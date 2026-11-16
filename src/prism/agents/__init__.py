@@ -1,4 +1,6 @@
-"""Multi-agent layer: runtime, roles, tools, policy gate, memory.
+"""Multi-agent layer: runtime, roles, tools, policy gate, memory."""
 
-Stage 0 ships package layout + contracts only. Implementation: stage 4.
-"""
+from prism.agents.policy import ActionGate, GateDecision
+from prism.agents.runtime import AgentAnswer, AgentRuntime, RunState
+
+__all__ = ["ActionGate", "AgentAnswer", "AgentRuntime", "GateDecision", "RunState"]

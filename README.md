@@ -70,9 +70,9 @@ tests/
 
 ## Current status
 
-**Stages 0–3 in progress:** dense + hybrid RAG (BM25, RRF/weighted), chunking C1–C7, rewrite R0–R5, optional cross-encoder rerank, eval runner + golden set, demo corpus.
+**Stages 0–4:** dense + hybrid RAG (BM25, RRF/weighted), chunking C1–C7, rewrite R0–R5, optional rerank, eval + golden set, **AgentRuntime** (Orchestrator / Retriever / Critic), ActionGate policies, subagents, memory. Chat: `mode=rag|agent`.
 
-Next: full ablation table on test, agent runtime (Stage 4).
+Next: ablation table on test, observability/UI trace (Stages 5–6).
 
 ---
 

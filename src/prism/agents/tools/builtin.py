@@ -113,9 +113,11 @@ def build_default_registry(ctx: ToolContext) -> ToolRegistry:
         citations = check_citations(answer, len(src))
         return {
             "grounding_ok": grounding.ok,
-            "grounding_score": grounding.score,
-            "citations_ok": citations.ok,
-            "detail": grounding.detail,
+            "citations_ok": citations.ok and not citations.missing,
+            "cited": grounding.cited,
+            "missing": grounding.missing,
+            "unsupported_numbers": grounding.unsupported_numbers,
+            "unsupported_names": grounding.unsupported_names,
         }
 
     def remember(layer: str, key: str, content: str) -> dict[str, Any]:

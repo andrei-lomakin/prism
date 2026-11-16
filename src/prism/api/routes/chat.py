@@ -50,10 +50,45 @@ def api_search(payload: SearchRequest, db: Session = Depends(get_db)) -> SearchR
 
 @router.post("/chat", response_model=ChatResponse)
 def api_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
-    if payload.mode == "agent":
-        raise HTTPException(501, "Agent mode lands in stage 4")
-
     cfg = settings_as_config(db)
+
+    if payload.mode == "agent":
+        from prism.agents import AgentRuntime
+
+        if payload.top_k is not None:
+            cfg.top_k = payload.top_k
+        try:
+            runtime = AgentRuntime(db, settings=cfg, persist=True)
+            answer = runtime.handle(payload.query, role="orchestrator")
+        except Exception as exc:
+            raise HTTPException(503, f"Agent run failed: {exc}") from exc
+        return ChatResponse(
+            query=payload.query,
+            answer=answer.answer,
+            model=answer.model,
+            citations=[
+                Citation(
+                    n=c["n"],
+                    chunk_id=int(c.get("chunk_id") or 0),
+                    doc_id=int(c.get("doc_id") or 0),
+                    title=str(c.get("title") or ""),
+                    section_path=c.get("section_path"),
+                    page=c.get("page"),
+                    score=round(float(c.get("score") or 0.0), 4),
+                )
+                for c in answer.citations
+            ],
+            retrieval_mode=answer.retrieval_mode,
+            grounding_ok=answer.grounding_ok,
+            usage=UsageOut(
+                tokens_in=answer.tokens_in,
+                tokens_out=answer.tokens_out,
+                cost_usd=answer.cost_usd,
+                latency_ms=answer.latency_ms,
+            ),
+            trace_id=answer.run_id,
+        )
+
     try:
         hits, mode = retrieve(db, payload.query, top_k=payload.top_k, settings=cfg)
     except Exception as exc:

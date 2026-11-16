@@ -1,3 +1,5 @@
+"""Backward-compatible stub; full coverage in test_policy_gate.py."""
+
 from prism.agents.policy import ActionGate
 
 
