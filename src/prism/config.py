@@ -78,6 +78,12 @@ class Settings(BaseSettings):
     llm_pii_redact: bool = True
     llm_input_usd_per_1m: float = 0.0  # local Ollama default = free
     llm_output_usd_per_1m: float = 0.0
+    # Comma-separated fallback models tried after primary fails (Ollama tags)
+    llm_fallback_models: str = ""
+
+    # Optional single-user auth (empty password = disabled)
+    auth_username: str = "prism"
+    auth_password: str = ""
 
     # ActionGate approval TTL (seconds); 0 = no expiry
     approval_ttl_seconds: int = Field(default=300, ge=0, le=86400)

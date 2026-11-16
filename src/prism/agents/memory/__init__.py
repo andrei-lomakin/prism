@@ -137,3 +137,66 @@ class MemoryStore:
             if len(hits) >= limit:
                 break
         return hits
+
+    def rollback(self, entry_id: int) -> dict[str, Any]:
+        """Re-activate a superseded entry; deactivate current active sibling (soft)."""
+        if self.db is not None:
+            target = self.db.get(MemoryEntry, entry_id)
+            if target is None:
+                return {"ok": False, "error": "not_found"}
+            current = (
+                self.db.query(MemoryEntry)
+                .filter(
+                    MemoryEntry.layer == target.layer,
+                    MemoryEntry.key == target.key,
+                    MemoryEntry.active.is_(True),
+                )
+                .all()
+            )
+            for row in current:
+                row.active = False
+            target.active = True
+            self.db.flush()
+            return {"ok": True, "id": target.id, "key": target.key, "layer": target.layer}
+
+        target = next((r for r in self._local if r["id"] == entry_id), None)
+        if target is None:
+            return {"ok": False, "error": "not_found"}
+        for row in self._local:
+            if row["layer"] == target["layer"] and row["key"] == target["key"] and row["active"]:
+                row["active"] = False
+        target["active"] = True
+        return {"ok": True, "id": target["id"], "key": target["key"], "layer": target["layer"]}
+
+    def history(self, layer: str, key: str) -> list[MemoryHit]:
+        hits: list[MemoryHit] = []
+        if self.db is not None:
+            rows = (
+                self.db.query(MemoryEntry)
+                .filter(MemoryEntry.layer == layer, MemoryEntry.key == key)
+                .order_by(MemoryEntry.id.desc())
+                .all()
+            )
+            for row in rows:
+                hits.append(
+                    MemoryHit(
+                        id=row.id,
+                        layer=row.layer,
+                        key=row.key,
+                        content=row.content,
+                        meta={**(row.meta or {}), "active": row.active},
+                    )
+                )
+            return hits
+        for row in reversed(self._local):
+            if row["layer"] == layer and row["key"] == key:
+                hits.append(
+                    MemoryHit(
+                        id=row["id"],
+                        layer=row["layer"],
+                        key=row["key"],
+                        content=row["content"],
+                        meta={**(row["meta"] or {}), "active": row["active"]},
+                    )
+                )
+        return hits

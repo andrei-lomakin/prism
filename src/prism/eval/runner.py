@@ -16,7 +16,17 @@ from prism.db.session import get_session_factory, init_db
 from prism.eval.aggregate import summarize_metric
 from prism.eval.dataset import load_golden, resolve_data_path
 from prism.eval.judge import judge_answer
-from prism.eval.metrics import hit_rate_at_k, mrr_at_k, ndcg_at_k, recall_at_k
+from prism.eval.metrics import (
+    answer_correctness_lexical,
+    context_precision_at_k,
+    context_recall_at_k,
+    hit_rate_at_k,
+    mrr_at_k,
+    ndcg_at_k,
+    precision_at_k,
+    recall_at_k,
+)
+from prism.eval.provenance import git_provenance
 from prism.eval.relevance import gold_doc_keys, retrieved_doc_keys
 from prism.eval.report import new_run_id, write_report
 from prism.eval.schema import GoldenQuestion
@@ -104,7 +114,8 @@ def run_eval(
 
     # metric accumulators
     r1, r3, r5, r10, mrr10, ndcg10, hit5 = [], [], [], [], [], [], []
-    faith, arel, cite_acc, refuse = [], [], [], []
+    p5, ctx_p5, ctx_r5 = [], [], []
+    faith, arel, cite_acc, refuse, correct = [], [], [], [], []
     ret_ms, gen_ms = [], []
     tokens_in = tokens_out = 0
 
@@ -132,12 +143,17 @@ def run_eval(
                 mrr10.append(row["mrr@10"])
                 ndcg10.append(row["ndcg@10"])
                 hit5.append(row["hit@5"])
+                p5.append(row["precision@5"])
+                ctx_p5.append(row["context_precision@5"])
+                ctx_r5.append(row["context_recall@5"])
 
             if gen_enabled and row.get("generation"):
                 g = row["generation"]
                 faith.append(g["faithfulness"])
                 arel.append(g["answer_relevance"])
                 cite_acc.append(1.0 if g["citation_ok"] else 0.0)
+                if g.get("correctness") is not None:
+                    correct.append(float(g["correctness"]))
                 if g.get("refusal_correct") is not None:
                     refuse.append(float(g["refusal_correct"]))
                 gen_ms.append(g.get("latency_ms") or 0)
@@ -160,10 +176,13 @@ def run_eval(
         "dataset": str(dataset_path),
         "n_questions": n_q,
         "generation_enabled": gen_enabled,
+        "provenance": git_provenance(),
         "rag": {
             "chunking": settings.chunking_strategy,
             "embedding": settings.embedding_model,
             "retrieval": settings.retrieval_mode,
+            "rewrite": settings.rewrite_strategy,
+            "rerank": settings.rerank_enabled,
             "top_k_eval": eval_top_k,
         },
         "retrieval": {
@@ -171,6 +190,9 @@ def run_eval(
             "recall@3": summarize_metric(r3),
             "recall@5": summarize_metric(r5),
             "recall@10": summarize_metric(r10),
+            "precision@5": summarize_metric(p5),
+            "context_precision@5": summarize_metric(ctx_p5),
+            "context_recall@5": summarize_metric(ctx_r5),
             "mrr@10": summarize_metric(mrr10),
             "ndcg@10": summarize_metric(ndcg10),
             "hit@5": summarize_metric(hit5),
@@ -190,10 +212,12 @@ def run_eval(
             "faithfulness": summarize_metric(faith),
             "answer_relevance": summarize_metric(arel),
             "citation_accuracy": summarize_metric(cite_acc),
+            "correctness": summarize_metric(correct) if correct else None,
             "refusal_accuracy": summarize_metric(refuse) if refuse else None,
             "judge_note": (
                 "LLM-as-judge via Ollama when available; heuristic fallback on failure. "
-                "Cohen's κ vs human labels: pending (see data/golden/ANNOTATION.md)."
+                "Cohen's κ vs human labels: pending (see data/golden/ANNOTATION.md). "
+                "Use `prism eval kappa --a ... --b ...` when dual annotations exist."
             ),
         }
 
@@ -231,6 +255,9 @@ def _eval_one(
         "recall@3": recall_at_k(relevant, ranked, 3) if relevant else None,
         "recall@5": recall_at_k(relevant, ranked, 5) if relevant else None,
         "recall@10": recall_at_k(relevant, ranked, 10) if relevant else None,
+        "precision@5": precision_at_k(relevant, ranked, 5) if relevant else None,
+        "context_precision@5": context_precision_at_k(relevant, ranked, 5) if relevant else None,
+        "context_recall@5": context_recall_at_k(relevant, ranked, 5) if relevant else None,
         "mrr@10": mrr_at_k(relevant, ranked, 10) if relevant else None,
         "ndcg@10": ndcg_at_k(relevant, ranked, 10) if relevant else None,
         "hit@5": hit_rate_at_k(relevant, ranked, 5) if relevant else None,
@@ -268,12 +295,16 @@ def _eval_one(
         settings=settings,
         use_llm=use_llm_judge,
     )
+    correctness = None
+    if q.type != "unanswerable" and q.gold_answer:
+        correctness = answer_correctness_lexical(q.gold_answer, answer)
     row["generation"] = {
         "answer": answer,
         "faithfulness": scores.faithfulness,
         "answer_relevance": scores.answer_relevance,
         "citation_ok": scores.citation_ok,
         "refusal_correct": scores.refusal_correct,
+        "correctness": correctness,
         "judge_method": scores.method,
         "latency_ms": gen_latency,
         "tokens_in": tin,

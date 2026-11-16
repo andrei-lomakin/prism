@@ -40,6 +40,14 @@ layers:
       tool: distill_run
       mode: auto
       locked: false
+    - id: system.python_sandbox
+      tool: python_sandbox
+      mode: ask
+      locked: false
+    - id: system.memory_rollback
+      tool: memory_rollback
+      mode: ask
+      locked: false
     - id: system.spawn_subagents
       tool: spawn_subagents
       mode: auto

@@ -83,12 +83,40 @@ eval-hybrid:
 eval-compare:
     {{ python }} -m prism.cli eval compare
 
+eval-kappa a="data/golden/annotator_a.example.jsonl" b="data/golden/annotator_b.example.jsonl":
+    {{ python }} -m prism.cli eval kappa --a {{ a }} --b {{ b }}
+
 agent-eval:
     {{ python }} -m prism.cli agent eval
+
+expand-corpus:
+    {{ python }} scripts/expand_corpus.py
+
+migrate:
+    {{ python }} -m alembic upgrade head
 
 # One-shot local demo bootstrap (compose must be running)
 demo: init-db ingest-demo rebuild-bm25
     @echo Open http://127.0.0.1:8000
+
+# Demo stack (compose overlay enables ollama service without --profile)
+up-demo:
+    docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --build
+
+# Stage 7 — defense prep (no DB required except optional test eval)
+defense-docs:
+    {{ python }} -m prism.cli eval provenance
+    {{ python }} -m prism.cli eval compare
+    {{ python }} -m prism.cli agent eval
+
+# Held-out retrieval (needs Postgres + indexed corpus)
+defense-test-eval:
+    {{ python }} -m prism.cli eval run --config configs/eval/ablate_hybrid_test.yaml --skip-generation
+    {{ python }} -m prism.cli eval run --config configs/eval/baseline_test.yaml --skip-generation
+    {{ python }} -m prism.cli eval compare
+
+defense-prep: check defense-docs
+    @echo See docs/DEFENSE.md docs/slides.md docs/FINAL_RESULTS.md
 
 up:
     docker compose up -d --build

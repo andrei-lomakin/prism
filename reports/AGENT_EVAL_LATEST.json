@@ -1,0 +1,307 @@
+{
+  "n": 32,
+  "passed": 32,
+  "failed": 0,
+  "success_rate": 1.0,
+  "avg_steps": 5.03125,
+  "forced_synthesis_rate": 0.03125,
+  "gate_ask_events": 0,
+  "single_vs_multi": {
+    "simple_n": 15,
+    "simple_avg_steps": 3.933,
+    "simple_success": 1.0,
+    "multi_n": 14,
+    "multi_avg_steps": 6.0,
+    "multi_success": 1.0
+  },
+  "results": [
+    {
+      "id": "a01",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 4,
+      "gate_asks": 0,
+      "complexity": "simple"
+    },
+    {
+      "id": "a02",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 4,
+      "gate_asks": 0,
+      "complexity": "simple"
+    },
+    {
+      "id": "a03",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 6,
+      "gate_asks": 0,
+      "complexity": "multi"
+    },
+    {
+      "id": "a04",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 6,
+      "gate_asks": 0,
+      "complexity": "multi"
+    },
+    {
+      "id": "a05",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 6,
+      "gate_asks": 0,
+      "complexity": "verify"
+    },
+    {
+      "id": "a06",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 4,
+      "gate_asks": 0,
+      "complexity": "simple"
+    },
+    {
+      "id": "a07",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 6,
+      "gate_asks": 0,
+      "complexity": "multi"
+    },
+    {
+      "id": "a08",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 4,
+      "gate_asks": 0,
+      "complexity": "simple"
+    },
+    {
+      "id": "a09",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 4,
+      "gate_asks": 0,
+      "complexity": "simple"
+    },
+    {
+      "id": "a10",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 6,
+      "gate_asks": 0,
+      "complexity": "multi"
+    },
+    {
+      "id": "a11",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 4,
+      "gate_asks": 0,
+      "complexity": "simple"
+    },
+    {
+      "id": "a12",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 6,
+      "gate_asks": 0,
+      "complexity": "multi"
+    },
+    {
+      "id": "a13",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 6,
+      "gate_asks": 0,
+      "complexity": "verify"
+    },
+    {
+      "id": "a14",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 4,
+      "gate_asks": 0,
+      "complexity": "simple"
+    },
+    {
+      "id": "a15",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 6,
+      "gate_asks": 0,
+      "complexity": "multi"
+    },
+    {
+      "id": "a16",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 4,
+      "gate_asks": 0,
+      "complexity": "simple"
+    },
+    {
+      "id": "a17",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 6,
+      "gate_asks": 0,
+      "complexity": "multi"
+    },
+    {
+      "id": "a18",
+      "success": true,
+      "state": "completed",
+      "partial": true,
+      "steps": 3,
+      "gate_asks": 0,
+      "complexity": "simple"
+    },
+    {
+      "id": "a19",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 4,
+      "gate_asks": 0,
+      "complexity": "simple"
+    },
+    {
+      "id": "a20",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 6,
+      "gate_asks": 0,
+      "complexity": "multi"
+    },
+    {
+      "id": "a21",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 4,
+      "gate_asks": 0,
+      "complexity": "simple"
+    },
+    {
+      "id": "a22",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 6,
+      "gate_asks": 0,
+      "complexity": "multi"
+    },
+    {
+      "id": "a23",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 6,
+      "gate_asks": 0,
+      "complexity": "verify"
+    },
+    {
+      "id": "a24",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 4,
+      "gate_asks": 0,
+      "complexity": "simple"
+    },
+    {
+      "id": "a25",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 6,
+      "gate_asks": 0,
+      "complexity": "multi"
+    },
+    {
+      "id": "a26",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 4,
+      "gate_asks": 0,
+      "complexity": "simple"
+    },
+    {
+      "id": "a27",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 6,
+      "gate_asks": 0,
+      "complexity": "multi"
+    },
+    {
+      "id": "a28",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 4,
+      "gate_asks": 0,
+      "complexity": "simple"
+    },
+    {
+      "id": "a29",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 6,
+      "gate_asks": 0,
+      "complexity": "multi"
+    },
+    {
+      "id": "a30",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 4,
+      "gate_asks": 0,
+      "complexity": "simple"
+    },
+    {
+      "id": "a31",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 6,
+      "gate_asks": 0,
+      "complexity": "research"
+    },
+    {
+      "id": "a32",
+      "success": true,
+      "state": "completed",
+      "partial": false,
+      "steps": 6,
+      "gate_asks": 0,
+      "complexity": "multi"
+    }
+  ]
+}

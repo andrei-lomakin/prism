@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from prism.api.auth import require_user
 from prism.api.schemas import (
     ChatRequest,
     ChatResponse,
@@ -25,7 +26,7 @@ from prism.observability import span, trace_buffer
 from prism.rag.generate import SYSTEM_PROMPT, build_rag_prompt, check_grounding
 from prism.rag.retrieve import retrieve
 
-router = APIRouter(prefix="/api", tags=["chat"])
+router = APIRouter(prefix="/api", tags=["chat"], dependencies=[Depends(require_user)])
 
 
 def _sse(event: str, data: dict) -> str:

@@ -24,25 +24,25 @@ jobs:
       - name: Ruff lint
         run: ruff check src tests
 
-      - name: Pytest
-        run: pytest -q
+      - name: Pytest + coverage
+        run: pytest -q --cov=prism --cov-report=term-missing
 
       - name: Agent scenarios (mock LLM)
         run: python -m prism.cli agent eval --scenarios data/agent_scenarios.jsonl
 
-      - name: Eval compare (from committed reports)
-        run: python -m prism.cli eval compare
+      - name: Eval compare + kappa example
+        run: |
+          python -m prism.cli eval compare
+          python -m prism.cli eval kappa --a data/golden/annotator_a.example.jsonl --b data/golden/annotator_b.example.jsonl
 
       - name: Gitleaks
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Optional retrieval smoke — needs indexed DB; skipped until demo fixtures in CI image.
-  # Enable when compose services + ingest-demo are wired into the job.
-  # retrieval-smoke:
-  #   runs-on: ubuntu-latest
-  #   services:
-  #     postgres:
-  #       image: pgvector/pgvector:pg16
-  #       ...
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build API image
+        run: docker build -t prism:ci .

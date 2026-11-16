@@ -1,0 +1,23 @@
+# Second 384-dim embedder ablation (same Vector(384) column — no migration)
+name: dense_minilm_l6
+chunking:
+  strategy: C2
+  size: 256
+  overlap: 32
+embedding:
+  model: sentence-transformers/all-MiniLM-L6-v2
+retrieval:
+  mode: dense
+  top_k: 10
+rewrite:
+  strategy: R0
+rerank:
+  enabled: false
+generation:
+  provider: ollama
+  model: qwen3:4b
+packer:
+  max_chunks: 8
+  max_tokens: 2048
+  max_per_doc: 3
+  min_score: 0.0

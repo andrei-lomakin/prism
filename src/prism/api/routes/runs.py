@@ -9,11 +9,12 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from prism.agents.policy import get_approval_store
+from prism.api.auth import require_user
 from prism.db.models import AgentRun, Step
 from prism.db.session import get_db
 from prism.observability import trace_buffer
 
-router = APIRouter(prefix="/api", tags=["runs"])
+router = APIRouter(prefix="/api", tags=["runs"], dependencies=[Depends(require_user)])
 
 
 class ApprovalDecision(BaseModel):

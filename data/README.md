@@ -6,7 +6,7 @@ Authored educational notes on RAG / embeddings / hybrid search / agents / eval (
 
 | Field | Value |
 |---|---|
-| Documents | 22 Markdown files |
+| Documents | 22+ Markdown files (grow with `just expand-corpus`) |
 | License | MIT (same as the Prism repository) — original text written for this diploma |
 | Purpose | Reproducible indexing + golden questions without third-party scrape risk |
 
@@ -15,6 +15,7 @@ Filename stem = stable **`doc_key`** used by the golden set (survives re-chunkin
 Index:
 
 ```bash
+just expand-corpus   # optional extra educational notes
 prism ingest-demo
 ```
 

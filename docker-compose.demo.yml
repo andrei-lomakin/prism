@@ -1,0 +1,17 @@
+# Demo overlay: bring up core services + optional local LLM.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --build
+# Then: just demo   (or: prism init-db && prism ingest-demo && prism rebuild-bm25)
+
+services:
+  api:
+    environment:
+      WEB_SEARCH_MOCK: "true"
+      DISTILL_ENABLED: "true"
+      OTEL_ENABLED: "false"
+
+  worker:
+    environment:
+      WEB_SEARCH_MOCK: "true"
+
+  ollama:
+    profiles: []  # enable ollama without --profile for demo stack

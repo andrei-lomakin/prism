@@ -44,3 +44,33 @@ def ndcg_at_k(relevant: set[str], retrieved: list[str], k: int) -> float:
     if idcg == 0:
         return 0.0
     return dcg_at_k(rels, k) / idcg
+
+
+def context_precision_at_k(relevant: set[str], retrieved: list[str], k: int) -> float:
+    """Fraction of top-k retrieved docs that are relevant (same as precision@k)."""
+    return precision_at_k(relevant, retrieved, k)
+
+
+def context_recall_at_k(relevant: set[str], retrieved: list[str], k: int) -> float:
+    """Fraction of gold docs appearing in top-k (same as recall@k)."""
+    return recall_at_k(relevant, retrieved, k)
+
+
+def answer_correctness_lexical(gold: str, answer: str) -> float:
+    """Token F1 between gold answer and model answer (0..1)."""
+    import re
+
+    def toks(s: str) -> set[str]:
+        return set(re.findall(r"[a-zA-Zа-яА-ЯёЁ0-9]{3,}", (s or "").lower()))
+
+    g, a = toks(gold), toks(answer)
+    if not g and not a:
+        return 1.0
+    if not g or not a:
+        return 0.0
+    inter = len(g & a)
+    prec = inter / len(a)
+    rec = inter / len(g)
+    if prec + rec == 0:
+        return 0.0
+    return 2 * prec * rec / (prec + rec)

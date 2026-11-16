@@ -6,11 +6,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
-from prism.eval.compare import collect_runs, write_comparison
+from prism.api.auth import require_user
+from prism.eval.compare import collect_runs, recall_bar_svg, write_comparison
 
-router = APIRouter(prefix="/api/eval", tags=["eval"])
+router = APIRouter(prefix="/api/eval", tags=["eval"], dependencies=[Depends(require_user)])
 ROOT = Path(__file__).resolve().parents[4]
 REPORTS = ROOT / "reports"
 
@@ -21,10 +22,12 @@ def list_ablations(refresh: bool = False) -> dict[str, Any]:
         write_comparison(reports_dir=REPORTS)
     rows = collect_runs(REPORTS)
     md_path = REPORTS / "ABLATION_TABLE.md"
+    svg_path = REPORTS / "ABLATION_RECALL.svg"
     return {
         "n": len(rows),
         "rows": rows,
         "markdown": md_path.read_text(encoding="utf-8") if md_path.is_file() else "",
+        "svg": svg_path.read_text(encoding="utf-8") if svg_path.is_file() else recall_bar_svg(rows),
     }
 
 

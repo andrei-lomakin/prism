@@ -85,7 +85,13 @@ def run_agent_scenarios(path: str | Path) -> dict[str, Any]:
         )
 
     n = len(scenarios) or 1
-    return {
+    multi = [r for r in results if r.get("complexity") in ("multi", "research")]
+    simple = [r for r in results if r.get("complexity") == "simple"]
+
+    def _avg_steps(rows: list[dict]) -> float:
+        return (sum(r["steps"] for r in rows) / len(rows)) if rows else 0.0
+
+    summary = {
         "n": len(scenarios),
         "passed": ok,
         "failed": len(scenarios) - ok,
@@ -93,5 +99,18 @@ def run_agent_scenarios(path: str | Path) -> dict[str, Any]:
         "avg_steps": steps_sum / n,
         "forced_synthesis_rate": forced / n,
         "gate_ask_events": blocked,
+        "single_vs_multi": {
+            "simple_n": len(simple),
+            "simple_avg_steps": round(_avg_steps(simple), 3),
+            "simple_success": sum(1 for r in simple if r["success"]) / max(1, len(simple)),
+            "multi_n": len(multi),
+            "multi_avg_steps": round(_avg_steps(multi), 3),
+            "multi_success": sum(1 for r in multi if r["success"]) / max(1, len(multi)),
+        },
         "results": results,
     }
+    out = ROOT / "reports" / "AGENT_EVAL_LATEST.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    summary["report"] = str(out)
+    return summary

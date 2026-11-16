@@ -45,6 +45,15 @@ def _markdown(summary: dict) -> str:
         f"- dataset: `{summary.get('dataset')}`",
         f"- questions: {summary.get('n_questions')}",
         f"- generation: {summary.get('generation_enabled')}",
+    ]
+    prov = summary.get("provenance") or {}
+    if prov.get("commit"):
+        dirty = " dirty" if prov.get("dirty") else ""
+        lines += [
+            f"- git: `{prov.get('commit_short')}` ({prov.get('branch')}){dirty}",
+            f"- describe: `{prov.get('describe')}`",
+        ]
+    lines += [
         "",
         "## Retrieval (answerable only)",
         "",

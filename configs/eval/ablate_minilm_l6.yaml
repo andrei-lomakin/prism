@@ -1,0 +1,8 @@
+name: ablate_minilm_l6
+rag_config: configs/rag/dense_minilm_l6.yaml
+golden: data/golden/dev.jsonl
+split: dev
+skip_generation: true
+top_ks: [1, 3, 5, 10]
+bootstrap_samples: 200
+seed: 42

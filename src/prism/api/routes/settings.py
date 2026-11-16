@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from prism import __version__
+from prism.api.auth import require_user
 from prism.api.schemas import HealthResponse, SettingsOut, SettingsUpdate
 from prism.api.settings_store import get_effective_settings, save_settings, settings_as_config
 from prism.db.session import get_db
@@ -19,17 +20,17 @@ def health() -> HealthResponse:
     return HealthResponse(status="ok", version=__version__)
 
 
-@router.get("/settings", response_model=SettingsOut)
+@router.get("/settings", response_model=SettingsOut, dependencies=[Depends(require_user)])
 def api_get_settings(db: Session = Depends(get_db)) -> SettingsOut:
     return get_effective_settings(db)
 
 
-@router.post("/settings", response_model=SettingsOut)
+@router.post("/settings", response_model=SettingsOut, dependencies=[Depends(require_user)])
 def api_update_settings(payload: SettingsUpdate, db: Session = Depends(get_db)) -> SettingsOut:
     return save_settings(db, payload)
 
 
-@router.get("/ollama/models")
+@router.get("/ollama/models", dependencies=[Depends(require_user)])
 def api_ollama_models(db: Session = Depends(get_db)) -> dict:
     cfg = settings_as_config(db)
     gateway = LLMGateway(cfg)

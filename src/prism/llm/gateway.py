@@ -100,30 +100,43 @@ class LLMGateway:
             if cached is not None:
                 return cached
 
-        with span(
-            "llm.chat",
-            attributes={
-                "provider": cfg.llm_provider,
-                "model": model_name,
-                "temperature": temperature,
-            },
-        ):
-            if cfg.llm_provider == "ollama":
-                result = self._ollama_chat(
-                    user_message=user,
-                    system_prompt=system,
-                    model=model_name,
-                    temperature=temperature,
-                )
-            elif cfg.llm_provider == "openai_compatible":
-                result = self._openai_chat(
-                    user_message=user,
-                    system_prompt=system,
-                    model=model_name,
-                    temperature=temperature,
-                )
-            else:
-                raise ValueError(f"Unknown llm_provider: {cfg.llm_provider}")
+        fallbacks = [m.strip() for m in (cfg.llm_fallback_models or "").split(",") if m.strip()]
+        candidates = [model_name] + [m for m in fallbacks if m != model_name]
+        last_err: Exception | None = None
+        result: LLMResult | None = None
+        for cand in candidates:
+            try:
+                with span(
+                    "llm.chat",
+                    attributes={
+                        "provider": cfg.llm_provider,
+                        "model": cand,
+                        "temperature": temperature,
+                    },
+                ):
+                    if cfg.llm_provider == "ollama":
+                        result = self._ollama_chat(
+                            user_message=user,
+                            system_prompt=system,
+                            model=cand,
+                            temperature=temperature,
+                        )
+                    elif cfg.llm_provider == "openai_compatible":
+                        result = self._openai_chat(
+                            user_message=user,
+                            system_prompt=system,
+                            model=cand,
+                            temperature=temperature,
+                        )
+                    else:
+                        raise ValueError(f"Unknown llm_provider: {cfg.llm_provider}")
+                break
+            except Exception as exc:  # noqa: BLE001 — try next fallback
+                last_err = exc
+                logger.warning("LLM %s failed: %s", cand, exc)
+                continue
+        if result is None:
+            raise RuntimeError(f"All LLM candidates failed: {candidates}") from last_err
 
         result.cost_usd = self._cost(result.tokens_in, result.tokens_out)
         if cache_key is not None:

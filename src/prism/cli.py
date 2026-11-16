@@ -40,6 +40,16 @@ def main(argv: list[str] | None = None) -> int:
         "compare",
         help="Build ablation comparison table from reports/*/metrics.json",
     )
+    eval_sub.add_parser(
+        "provenance",
+        help="Print git provenance JSON (for defense reports)",
+    )
+    kappa_p = eval_sub.add_parser(
+        "kappa",
+        help="Cohen's κ between two annotator JSONL files (id,label)",
+    )
+    kappa_p.add_argument("--a", required=True, help="Annotator A jsonl")
+    kappa_p.add_argument("--b", required=True, help="Annotator B jsonl")
     agent_p = sub.add_parser("agent", help="Agent runtime commands")
     agent_sub = agent_p.add_subparsers(dest="agent_cmd")
     agent_eval = agent_sub.add_parser("eval", help="Run agent scenarios (mock LLM)")
@@ -101,6 +111,18 @@ def main(argv: list[str] | None = None) -> int:
 
         summary = write_comparison()
         print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.cmd == "eval" and args.eval_cmd == "provenance":
+        from prism.eval.provenance import git_provenance
+
+        print(json.dumps(git_provenance(), ensure_ascii=False, indent=2))
+        return 0
+
+    if args.cmd == "eval" and args.eval_cmd == "kappa":
+        from prism.eval.kappa_tools import kappa_from_files
+
+        print(json.dumps(kappa_from_files(args.a, args.b), ensure_ascii=False, indent=2))
         return 0
 
     if args.cmd == "agent" and args.agent_cmd == "eval":

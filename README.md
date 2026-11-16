@@ -22,9 +22,58 @@ Prism keeps the ML core explicit and ablatable. The web UI and API stay delibera
 |---|---|
 | **Ingest** | PDF, DOCX, Markdown, TXT, HTML, URL → normalized text → chunks |
 | **RAG** | Pluggable chunking, embeddings, dense / lexical / hybrid search, reranker, query rewriting, grounded generation with citation checks |
-| **Eval** | Golden dataset, retrieval & generation metrics, ablation reports (quality × latency × $) |
-| **Agents** | Orchestrator + specialist roles (retriever, web, analyst, critic), tool policy gate, budgets, run traces |
-| **Ops** | Docker Compose (API, worker, Postgres+pgvector, Redis), local LLM via Ollama or optional OpenAI-compatible APIs |
+| **Eval** | Golden dataset, retrieval & generation metrics, ablation reports (quality × latency × $), git provenance in every report |
+| **Agents** | Orchestrator + Retriever / Web / Analyst / Critic, ActionGate, budgets, distill, traces |
+| **Ops** | Docker Compose (API, worker, Postgres+pgvector, Redis), Ollama or OpenAI-compatible APIs |
+
+---
+
+## Current status
+
+**Stages 0–7 complete** (diploma slice per TZ). Honest gaps: Cohen's κ (human second pass), GIF not committed, sync subagents, corpus still << TZ 300–1000 (expandable via `just expand-corpus`).
+
+Defense pack: [`docs/DEFENSE.md`](docs/DEFENSE.md) · [`docs/slides.md`](docs/slides.md) · [`docs/FINAL_RESULTS.md`](docs/FINAL_RESULTS.md) · [`docs/adr/`](docs/adr/)
+
+---
+
+## Quick start
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+pip install -e ".[dev]"   # or: just install
+just demo                 # init-db + ingest-demo + rebuild-bm25
+```
+
+Open **http://127.0.0.1:8000** (prefer `127.0.0.1` on Windows).
+
+Full walkthrough: [`docs/DEMO.md`](docs/DEMO.md).
+
+---
+
+## Reproduce (defense)
+
+```bash
+just check              # fmt + lint + pytest
+just defense-prep       # check + provenance + ablation table + agent eval
+# with DB up + indexed corpus:
+just defense-test-eval  # held-out hybrid + dense on test.jsonl
+```
+
+Every eval report under `reports/<run_id>/` includes:
+
+- `metrics.json` / `summary.md` / `per_question.jsonl`
+- **`provenance.commit`** (git SHA, branch, dirty flag)
+
+```bash
+prism eval provenance
+prism eval compare      # → reports/ABLATION_TABLE.md + ABLATION_RECALL.svg
+prism eval kappa --a data/golden/annotator_a.example.jsonl --b data/golden/annotator_b.example.jsonl
+```
+
+Canonical numbers: [`docs/FINAL_RESULTS.md`](docs/FINAL_RESULTS.md).
+
+Optional auth: set `AUTH_PASSWORD` in `.env` (HTTP Basic on `/api/*`; `/api/health` stays open).
 
 ---
 
@@ -35,116 +84,60 @@ UI (Jinja) ──► FastAPI
                  │
                  ├─► Postgres + pgvector   (documents, chunks, vectors, runs, memory)
                  ├─► BM25 index on disk    (lexical / hybrid)
-                 ├─► Redis + arq worker    (ingest, agent runs, eval jobs)
+                 ├─► Redis + arq worker    (ingest jobs)
                  ├─► LLMGateway            (Ollama | OpenAI-compatible)
                  └─► Embeddings / reranker (local sentence-transformers / cross-encoder)
 ```
 
-**Design rules**
+Design rules: one interface per concern · fail-closed tool policy · grounded `[n]` answers · measure, don’t assert.
 
-1. **One interface per concern** — swap chunker / embedder / retriever without rewriting the stack.
-2. **Fail-closed tool policy** — unknown or risky actions require human approval.
-3. **Grounded answers** — numbered sources `[n]`; missing evidence → explicit refusal.
-4. **Measure, don’t assert** — every RAG change is backed by eval numbers on a held-out set.
+Deep dive (Russian, gitignored in some clones): `docs/architecture.md`.
 
 ---
 
-## Repository layout
+## Eval snapshot (dev, hybrid RRF)
 
-```
-src/prism/
-  api/           # FastAPI + minimal UI
-  ingest/        # parsers + indexing pipeline
-  rag/           # chunking, embeddings, index, retrieve, rerank, rewrite, generate
-  llm/           # LLM gateway (providers, usage hooks)
-  agents/        # runtime, roles, tools, policy gate, memory
-  eval/          # metrics, judge, ablation runner
-  worker/        # background jobs (arq)
-  db/            # SQLAlchemy models, pgvector
-configs/         # RAG / eval / policy YAML
-data/            # demo corpus + golden set (licenses documented)
-tests/
-```
+| Metric | mean |
+|---|---:|
+| Recall@5 | 0.934 |
+| MRR@10 | 0.754 |
+| nDCG@10 | 0.817 |
+| Hit@5 | 1.000 |
 
----
-
-## Current status
-
-**Stages 0–6:** RAG + eval/ablations, full agent stack (Orchestrator/Retriever/Web/Analyst/Critic, Gate, distill), observability, product UI (`/search` stream, `/trace`, `/approvals`, `/eval`). Demo: [`docs/DEMO.md`](docs/DEMO.md).
-
-Next: Stage 7 — ADR, slides, final held-out eval write-up.
-
----
-
-## Quick start
-
-```bash
-cp .env.example .env
-docker compose up -d --build
-```
-
-Open **http://localhost:8000**
-
-Ollama should be reachable from the API container (`OLLAMA_BASE_URL`, default `http://host.docker.internal:11434`).  
-Optional: `docker compose --profile local-llm up -d` and pull a chat model (e.g. `qwen2.5`).
-
-Local (Postgres+pgvector and Redis required):
-
-```bash
-pip install -e ".[dev]"
-prism init-db
-uvicorn prism.api.app:app --reload --port 8000
-arq prism.worker.settings.WorkerSettings
-```
-
-Index the demo corpus and (re)build the golden set:
-
-```bash
-prism ingest-demo
-prism golden build --target 240
-```
-
-Eval (Stage 2):
-
-```bash
-# retrieval-only smoke (fast)
-prism eval run --config configs/eval/smoke.yaml --skip-generation
-
-# full baseline on dev (retrieve + generate + judge)
-prism eval run --config configs/eval/baseline.yaml
-```
-
-Reports land in `reports/<run_id>/` (`metrics.json`, `summary.md`, `per_question.jsonl`).
-
-Hybrid ablation example:
-
-```bash
-prism rebuild-bm25
-prism eval run --config configs/eval/ablate_hybrid.yaml --skip-generation
-```
-
-UI: **http://127.0.0.1:8000** (prefer `127.0.0.1` over `localhost` on Windows/WSL).  
-Postgres from host: port **5434** (see `.env.example`).
-
-Default models: embedder `paraphrase-multilingual-MiniLM-L12-v2`, chat `qwen3:4b` via Ollama.
+Default chat model: `qwen3:4b` (Ollama). Embedder: `paraphrase-multilingual-MiniLM-L12-v2`. Postgres host port **5434**.
 
 ---
 
 ## Lint / format / test
 
-Requires [just](https://github.com/casey/just) (`winget install just` / `cargo install just`).
+Requires [just](https://github.com/casey/just).
 
 ```bash
-just check      # fmt-check + lint + pytest
-just fix        # ruff format + lint --fix
-just test       # pytest -q
-just lint       # ruff check
-just fmt        # ruff format
+just check / just fix / just test / just lint / just fmt
 ```
 
-Without just: `ruff check src tests`, `ruff format src tests`, `pytest -q`.
+---
+
+## Slides
+
+Marp source: `docs/slides.md` → prebuilt `docs/slides.pdf`.
+
+```bash
+npx --yes @marp-team/marp-cli docs/slides.md -o docs/slides.pdf
+```
 
 ---
+
+## Attribution / third-party
+
+| Component | License / note |
+|---|---|
+| Demo corpus (`data/demo/corpus/`) | Original MIT educational notes for this diploma |
+| `sentence-transformers` / MiniLM | Apache-2.0 (Hugging Face model cards) |
+| `bm25s`, FastAPI, SQLAlchemy, pgvector | respective OSS licenses |
+| Ollama models (e.g. qwen3) | follow model card terms |
+
+No scraped copyrighted books/articles in the committed corpus.
 
 ## License
 

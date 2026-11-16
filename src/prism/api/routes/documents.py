@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from prism.api.auth import require_user
 from prism.api.schemas import (
     DocumentListResponse,
     DocumentOut,
@@ -19,7 +20,7 @@ from prism.api.schemas import (
     UrlIngestRequest,
 )
 from prism.config import get_settings
-from prism.db.models import Document, Job
+from prism.db.models import Chunk, Document, Job
 from prism.db.session import get_db
 from prism.ingest.parsers import (
     ALLOWED_EXTENSIONS,
@@ -28,7 +29,7 @@ from prism.ingest.parsers import (
     suggest_name_from_url,
 )
 
-router = APIRouter(prefix="/api", tags=["documents"])
+router = APIRouter(prefix="/api", tags=["documents"], dependencies=[Depends(require_user)])
 
 
 def _doc_out(d: Document) -> DocumentOut:
@@ -157,6 +158,37 @@ def get_document(document_id: int, db: Session = Depends(get_db)) -> DocumentOut
     if doc is None:
         raise HTTPException(404, "Document not found")
     return _doc_out(doc)
+
+
+@router.get("/documents/{document_id}/chunks")
+def list_chunks(
+    document_id: int,
+    db: Session = Depends(get_db),
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    doc = db.get(Document, document_id)
+    if doc is None:
+        raise HTTPException(404, "Document not found")
+    q = db.query(Chunk).filter(Chunk.document_id == document_id).order_by(Chunk.chunk_index.asc())
+    total = q.count()
+    rows = q.offset(max(0, offset)).limit(min(200, max(1, limit))).all()
+    return {
+        "document_id": document_id,
+        "name": doc.name,
+        "total": total,
+        "items": [
+            {
+                "id": c.id,
+                "chunk_index": c.chunk_index,
+                "section_path": c.section_path,
+                "page": c.page,
+                "token_count": c.token_count,
+                "text": c.text[:800],
+            }
+            for c in rows
+        ],
+    }
 
 
 @router.delete("/documents/{document_id}")

@@ -170,8 +170,32 @@ const PrismApp = {
           <span class="badge ${d.status === 'indexed' ? 'ok' : d.status === 'error' ? 'err' : ''}">${d.status}</span>
           <div class="muted">${d.num_chunks} chunks · ${d.space}</div>
         </div>
-        <button class="btn btn-ghost" onclick="PrismApp.deleteDoc(${d.id})">Удалить</button>
+        <div class="row">
+          <button class="btn btn-ghost" onclick="PrismApp.previewChunks(${d.id})">Чанки</button>
+          <button class="btn btn-ghost" onclick="PrismApp.deleteDoc(${d.id})">Удалить</button>
+        </div>
       </div>`).join('') || '<p class="muted">Пока пусто</p>';
+  },
+
+  async previewChunks(id) {
+    const box = document.getElementById('chunk-preview');
+    if (!box) return;
+    box.textContent = 'Загрузка…';
+    const res = await fetch(`/api/documents/${id}/chunks?limit=20`);
+    const data = await res.json();
+    if (!res.ok) {
+      box.textContent = data.detail || 'Ошибка';
+      return;
+    }
+    box.innerHTML = `<h3>${data.name} · ${data.total} chunks</h3>` +
+      (data.items || []).map((c) => `
+        <div class="doc-row">
+          <div>
+            <strong>#${c.chunk_index}</strong>
+            <span class="muted">${c.section_path || ''} · ${c.token_count || 0} tok</span>
+            <pre class="answer" style="white-space:pre-wrap;margin:.4rem 0 0">${(c.text || '').replace(/</g,'&lt;')}</pre>
+          </div>
+        </div>`).join('');
   },
 
   async deleteDoc(id) {

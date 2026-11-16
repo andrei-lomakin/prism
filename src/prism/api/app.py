@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from prism.api.routes import chat, documents, eval_ui, runs
+from prism.api.routes import chat, documents, eval_ui, memory, runs
 from prism.api.routes import settings as settings_routes
 from prism.api.settings_store import get_effective_settings
 from prism.config import get_settings
@@ -57,6 +57,7 @@ app.include_router(chat.router)
 app.include_router(settings_routes.router)
 app.include_router(runs.router)
 app.include_router(eval_ui.router)
+app.include_router(memory.router)
 
 
 @app.get("/", response_class=RedirectResponse)

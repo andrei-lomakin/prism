@@ -307,6 +307,28 @@ def build_default_registry(ctx: ToolContext) -> ToolRegistry:
             plan=plan,
         )
 
+    def python_sandbox(code: str) -> dict[str, Any]:
+        """Restricted stub: no exec. Parses simple `print(expr)` arithmetic only."""
+        code = (code or "").strip()
+        m = re.fullmatch(r"print\((.+)\)", code)
+        if not m:
+            return {
+                "ok": False,
+                "error": "sandbox_stub: only print(<arithmetic>) allowed",
+                "stdout": "",
+            }
+        expr = m.group(1)
+        if not re.fullmatch(r"[0-9+\-*/().\s]+", expr):
+            return {"ok": False, "error": "sandbox_stub: disallowed tokens", "stdout": ""}
+        try:
+            val = eval(expr, {"__builtins__": {}}, {})  # noqa: S307 — intentional tiny arith
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc), "stdout": ""}
+        return {"ok": True, "stdout": str(val), "expr": expr}
+
+    def memory_rollback(entry_id: int) -> dict[str, Any]:
+        return ctx.memory.rollback(int(entry_id))
+
     specs = [
         ToolSpec(
             code="search_kb",
@@ -425,6 +447,20 @@ def build_default_registry(ctx: ToolContext) -> ToolRegistry:
                 "plan": "dict?",
             },
             execute=distill_run,
+        ),
+        ToolSpec(
+            code="python_sandbox",
+            category="analysis",
+            side_effect="none",
+            schema={"code": "str"},
+            execute=python_sandbox,
+        ),
+        ToolSpec(
+            code="memory_rollback",
+            category="memory",
+            side_effect="write",
+            schema={"entry_id": "int"},
+            execute=memory_rollback,
         ),
     ]
     for spec in specs:

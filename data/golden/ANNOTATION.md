@@ -33,6 +33,9 @@ Languages: `ru` / `en`. Target mix: both present; unanswerable ≥10%; multi-hop
   - answerable vs unanswerable;
   - type tag.
 - Report Cohen's κ on those 30 after the second pass. Until then `stats.json` records `reviewed` count; κ is **pending** (honest gap, not fabricated).
+- Tooling: write two JSONL files `{id,label}` and run
+  `prism eval kappa --a annotator_a.jsonl --b annotator_b.jsonl`
+  (see `data/golden/annotator_*.example.jsonl` for format).
 
 ## Split policy
 

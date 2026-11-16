@@ -7,6 +7,7 @@
   <div class="row">
     <button type="button" id="btn-refresh" class="btn">Обновить таблицу</button>
   </div>
+  <div id="chart" style="overflow:auto;margin:1rem 0"></div>
   <div id="table" class="answer" style="overflow:auto"></div>
   <h2>Худшие вопросы</h2>
   <div class="row">
@@ -22,6 +23,7 @@
     const r = await fetch('/api/eval/ablations' + (refresh ? '?refresh=true' : ''));
     const data = await r.json();
     document.getElementById('table').textContent = data.markdown || JSON.stringify(data.rows, null, 2);
+    document.getElementById('chart').innerHTML = data.svg || '';
     if (data.rows && data.rows.length) {
       const best = [...data.rows].filter(x => x['recall@5'] != null).sort((a,b)=>b['recall@5']-a['recall@5'])[0];
       if (best) document.getElementById('run_id').value = best.run_id;

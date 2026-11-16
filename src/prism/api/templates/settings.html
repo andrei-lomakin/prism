@@ -31,6 +31,10 @@
     <button type="submit" class="btn">Сохранить</button>
   </form>
   <pre id="settings-msg" class="muted"></pre>
+  <p class="muted" style="margin-top:1.5rem">
+    Auth: если в <code>.env</code> задан <code>AUTH_PASSWORD</code>, браузер запросит HTTP Basic
+    для API. <code>/api/health</code> остаётся открытым.
+  </p>
 </section>
 {% endblock %}
 {% block scripts %}
