@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import queue
+import threading
 from collections.abc import Iterator
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -20,7 +23,7 @@ from prism.api.schemas import (
     UsageOut,
 )
 from prism.api.settings_store import settings_as_config
-from prism.db.session import get_db
+from prism.db.session import get_db, get_session_factory
 from prism.llm import LLMGateway
 from prism.observability import span, trace_buffer
 from prism.rag.generate import SYSTEM_PROMPT, build_rag_prompt, check_grounding
@@ -39,7 +42,13 @@ def api_search(payload: SearchRequest, db: Session = Depends(get_db)) -> SearchR
     tid = trace_buffer.start_trace()
     try:
         with span("api.search", attributes={"trace_id": tid}):
-            hits, mode = retrieve(db, payload.query, top_k=payload.top_k, settings=cfg)
+            hits, mode = retrieve(
+                db,
+                payload.query,
+                top_k=payload.top_k,
+                settings=cfg,
+                space=payload.space,
+            )
     except Exception as exc:
         raise HTTPException(503, f"Search failed: {exc}") from exc
     return SearchResponse(
@@ -66,11 +75,13 @@ def api_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespons
 
     tid = trace_buffer.start_trace()
 
+    if payload.top_k is not None:
+        cfg.top_k = payload.top_k
+    cfg.space_filter = None if payload.space == "all" else payload.space
+
     if payload.mode == "agent":
         from prism.agents import AgentRuntime
 
-        if payload.top_k is not None:
-            cfg.top_k = payload.top_k
         try:
             with span("api.chat.agent", attributes={"trace_id": tid}):
                 runtime = AgentRuntime(db, settings=cfg, persist=True)
@@ -106,7 +117,13 @@ def api_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespons
 
     try:
         with span("api.chat.rag", attributes={"trace_id": tid}):
-            hits, mode = retrieve(db, payload.query, top_k=payload.top_k, settings=cfg)
+            hits, mode = retrieve(
+                db,
+                payload.query,
+                top_k=payload.top_k,
+                settings=cfg,
+                space=None if payload.space == "all" else payload.space,
+            )
             contexts = [
                 {
                     "text": h.text,
@@ -161,17 +178,80 @@ def api_chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> Stre
     def gen() -> Iterator[str]:
         yield _sse("start", {"trace_id": tid, "mode": payload.mode})
         try:
+            if payload.top_k is not None:
+                cfg.top_k = payload.top_k
+            cfg.space_filter = None if payload.space == "all" else payload.space
             if payload.mode == "agent":
                 from prism.agents import AgentRuntime
 
-                if payload.top_k is not None:
-                    cfg.top_k = payload.top_k
-                runtime = AgentRuntime(db, settings=cfg, persist=True)
-                answer = runtime.handle(payload.query, role="orchestrator")
-                yield _sse("plan", answer.plan)
-                for step in answer.steps:
-                    yield _sse("step", step)
-                # chunk answer for UX
+                # Run agent in a side thread with its own DB session so we can
+                # SSE-emit steps while LLM/tool calls are still in progress.
+                # (Request-scoped `db` is not thread-safe.)
+                events: queue.Queue[tuple[str, Any]] = queue.Queue()
+
+                def _worker() -> None:
+                    session = get_session_factory()()
+                    try:
+
+                        def _on_step(rec: dict[str, Any]) -> None:
+                            events.put(("step", rec))
+
+                        runtime = AgentRuntime(
+                            session,
+                            settings=cfg,
+                            persist=True,
+                            on_step=_on_step,
+                        )
+                        events.put(
+                            (
+                                "status",
+                                {
+                                    "text": "Оцениваем сложность запроса и строим план…",
+                                },
+                            )
+                        )
+                        ans = runtime.handle(payload.query, role="orchestrator")
+                        events.put(("done", ans))
+                    except Exception as exc:  # noqa: BLE001
+                        events.put(("error", exc))
+                    finally:
+                        session.close()
+
+                threading.Thread(target=_worker, daemon=True).start()
+                yield _sse(
+                    "status",
+                    {
+                        "text": "Агент запущен: оценка сложности → инструменты → ответ "
+                        "(ожидание LLM может быть долгим)…",
+                    },
+                )
+                answer = None
+                while True:
+                    kind, payload_evt = events.get()
+                    if kind == "status":
+                        yield _sse("status", payload_evt)
+                    elif kind == "step":
+                        step = payload_evt
+                        if step.get("kind") == "plan":
+                            yield _sse("plan", step.get("output") or {})
+                            yield _sse(
+                                "status",
+                                {"text": "План готов, выполняем инструменты…"},
+                            )
+                        yield _sse("step", step)
+                        title = step.get("kind") or "шаг"
+                        yield _sse(
+                            "status",
+                            {"text": f"Агент: шаг {step.get('n', '?')} ({title})…"},
+                        )
+                    elif kind == "done":
+                        answer = payload_evt
+                        break
+                    elif kind == "error":
+                        raise payload_evt
+
+                assert answer is not None
+                yield _sse("status", {"text": "Печатаем ответ…"})
                 text = answer.answer or ""
                 chunk_size = 48
                 for i in range(0, len(text), chunk_size):
@@ -190,11 +270,19 @@ def api_chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> Stre
                     },
                 )
             else:
-                hits, mode = retrieve(db, payload.query, top_k=payload.top_k, settings=cfg)
+                yield _sse("status", {"text": "Ищем релевантные фрагменты в базе…"})
+                hits, mode = retrieve(
+                    db,
+                    payload.query,
+                    top_k=payload.top_k,
+                    settings=cfg,
+                    space=None if payload.space == "all" else payload.space,
+                )
                 yield _sse(
                     "retrieval",
                     {"mode": mode, "n": len(hits), "docs": [h.document_name for h in hits[:5]]},
                 )
+                yield _sse("status", {"text": "Генерируем ответ по найденному контексту…"})
                 contexts = [
                     {
                         "text": h.text,

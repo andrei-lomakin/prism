@@ -3,11 +3,12 @@
 {% block content %}
 <section class="panel">
   <h1>Настройки RAG / LLM</h1>
+  <p class="lede muted">Параметры по умолчанию для поиска и генерации. Сохраняются в БД поверх <code>.env</code>.</p>
   <form id="settings-form" class="stack">
-    <label>Embedding model
+    <label>Модель эмбеддингов
       <input name="embedding_model" value="{{ settings.embedding_model }}" />
     </label>
-    <label>Chunking strategy (C1–C3)
+    <label>Стратегия нарезки (C1–C3)
       <select name="chunking_strategy">
         {% for c in ['C1','C2','C3'] %}
         <option value="{{ c }}" {% if settings.chunking_strategy == c %}selected{% endif %}>{{ c }}</option>
@@ -15,33 +16,109 @@
       </select>
     </label>
     <div class="row">
-      <label>chunk_size <input type="number" name="chunk_size" value="{{ settings.chunk_size }}" /></label>
-      <label>overlap <input type="number" name="chunk_overlap" value="{{ settings.chunk_overlap }}" /></label>
-      <label>top_k <input type="number" name="top_k" value="{{ settings.top_k }}" /></label>
+      <label>Размер фрагмента <input type="number" name="chunk_size" value="{{ settings.chunk_size }}" /></label>
+      <label>Перекрытие <input type="number" name="chunk_overlap" value="{{ settings.chunk_overlap }}" /></label>
+      <label>Фрагментов (top_k) <input type="number" name="top_k" value="{{ settings.top_k }}" /></label>
     </div>
-    <label>Retrieval mode
+    <label>Режим поиска
       <select name="retrieval_mode">
-        {% for m in ['dense','lexical','hybrid'] %}
-        <option value="{{ m }}" {% if settings.retrieval_mode == m %}selected{% endif %}>{{ m }}</option>
-        {% endfor %}
+        <option value="dense" {% if settings.retrieval_mode == 'dense' %}selected{% endif %}>Векторный (dense)</option>
+        <option value="lexical" {% if settings.retrieval_mode == 'lexical' %}selected{% endif %}>Лексический (BM25)</option>
+        <option value="hybrid" {% if settings.retrieval_mode == 'hybrid' %}selected{% endif %}>Гибридный</option>
       </select>
     </label>
-    <label>LLM model <input name="llm_model" value="{{ settings.llm_model }}" /></label>
-    <label>Ollama URL <input name="ollama_base_url" value="{{ settings.ollama_base_url }}" /></label>
+    <label>Адрес Ollama
+      <input name="ollama_base_url" id="ollama_base_url" value="{{ settings.ollama_base_url }}" />
+    </label>
+    <div class="field">
+      <div class="field-head">
+        <span class="field-title">Модель LLM (Ollama)</span>
+        <button type="button" class="tip" aria-label="Подсказка: модель" data-tip>
+          ?
+          <span class="tip-pop" role="tooltip">
+            Список берётся с Ollama (<code>/api/tags</code>). Сначала сохрани адрес Ollama,
+            если менял — затем «Обновить список».
+          </span>
+        </button>
+      </div>
+      <div class="row" style="align-items:center">
+        <select name="llm_model" id="llm_model" style="flex:1">
+          <option value="{{ settings.llm_model }}" selected>{{ settings.llm_model }}</option>
+        </select>
+        <button type="button" id="btn-refresh-models" class="btn btn-ghost">Обновить список</button>
+      </div>
+      <p id="models-hint" class="muted" style="margin:.35rem 0 0;font-size:.85rem"></p>
+    </div>
     <button type="submit" class="btn">Сохранить</button>
   </form>
   <pre id="settings-msg" class="muted"></pre>
   <p class="muted" style="margin-top:1.5rem">
-    Auth: если в <code>.env</code> задан <code>AUTH_PASSWORD</code>, браузер запросит HTTP Basic
+    Авторизация: если в <code>.env</code> задан <code>AUTH_PASSWORD</code>, браузер запросит логин/пароль
     для API. <code>/api/health</code> остаётся открытым.
   </p>
 </section>
 {% endblock %}
 {% block scripts %}
 <script>
+  const CURRENT_MODEL = {{ settings.llm_model|tojson }};
+
+  function fmtSize(bytes) {
+    if (!bytes) return '';
+    const gb = bytes / (1024 ** 3);
+    return gb >= 1 ? ` · ${gb.toFixed(1)} ГБ` : ` · ${(bytes / (1024 ** 2)).toFixed(0)} МБ`;
+  }
+
+  async function loadOllamaModels() {
+    const sel = document.getElementById('llm_model');
+    const hint = document.getElementById('models-hint');
+    hint.textContent = 'Загрузка списка с Ollama…';
+    const prev = sel.value || CURRENT_MODEL;
+    try {
+      const r = await fetch('/api/ollama/models');
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail || 'Ollama недоступна');
+      const models = data.models || [];
+      sel.innerHTML = '';
+      if (!models.length) {
+        sel.innerHTML = `<option value="${prev}">${prev}</option>`;
+        hint.textContent = 'На сервере нет моделей. Пример: ollama pull qwen2.5:1.5b';
+        return;
+      }
+      const names = new Set();
+      for (const m of models) {
+        names.add(m.name);
+        const opt = document.createElement('option');
+        opt.value = m.name;
+        opt.textContent = m.name + fmtSize(m.size);
+        if (m.name === prev) opt.selected = true;
+        sel.appendChild(opt);
+      }
+      if (prev && !names.has(prev)) {
+        const opt = document.createElement('option');
+        opt.value = prev;
+        opt.textContent = prev + ' (нет на сервере)';
+        opt.selected = true;
+        sel.prepend(opt);
+        hint.textContent = `Текущая «${prev}» не найдена в Ollama. Выберите из списка или: ollama pull ${prev}`;
+      } else {
+        hint.textContent = `Доступно моделей: ${models.length} · ${data.ollama_base_url || ''}`;
+      }
+    } catch (err) {
+      hint.textContent = String(err.message || err);
+    }
+  }
+
+  document.getElementById('btn-refresh-models').onclick = loadOllamaModels;
   document.getElementById('settings-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     await PrismApp.saveSettings(e.target);
   });
+  document.querySelectorAll('[data-tip]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      btn.classList.toggle('open');
+    });
+  });
+  loadOllamaModels();
 </script>
 {% endblock %}

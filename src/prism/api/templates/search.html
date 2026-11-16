@@ -2,43 +2,198 @@
 {% block title %}Поиск · Prism{% endblock %}
 {% block content %}
 <section class="panel">
-  <h1>Вопрос к базе</h1>
-  <p class="muted">RAG или агентный режим (Orchestrator → tools через ActionGate).</p>
-  <form id="chat-form" class="stack">
-    <textarea id="query" rows="3" placeholder="Задайте вопрос…" required></textarea>
-    <div class="row">
-      <label>top_k <input type="number" id="top_k" value="{{ default_top_k }}" min="1" max="20" /></label>
-      <label>режим
-        <select id="mode">
-          <option value="rag">быстрый RAG</option>
+  <form id="chat-form" class="stack chat-form">
+    <label class="query-label" for="query">Вопрос</label>
+    <textarea id="query" rows="3" placeholder="Например: чем hybrid отличается от dense?" required></textarea>
+
+    <div class="controls-grid">
+      <div class="field">
+        <div class="field-head">
+          <span class="field-title">Сколько фрагментов</span>
+          <button type="button" class="tip" aria-label="Подсказка: число фрагментов" data-tip>
+            ?
+            <span class="tip-pop" role="tooltip">
+              <strong>Число фрагментов (top_k)</strong> — сколько кусков документов попадёт
+              в контекст модели или в список «Только поиск».
+              <ul>
+                <li><b>3–5</b> — обычный факт</li>
+                <li><b>8–12</b> — сравнение / несколько документов</li>
+                <li>Слишком много → шум и лишние токены</li>
+              </ul>
+            </span>
+          </button>
+        </div>
+        <div class="field-body field-number">
+          <input type="number" id="top_k" value="{{ default_top_k }}" min="1" max="20" />
+          <span class="field-suffix">макс. 20</span>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-head">
+          <span class="field-title">Режим ответа</span>
+          <button type="button" class="tip" aria-label="Подсказка: режим" data-tip>
+            ?
+            <span class="tip-pop" role="tooltip">
+              Как система отвечает:
+              <ul>
+                <li><b>Быстрый RAG</b> — поиск → один ответ с цитатами</li>
+                <li><b>Агент</b> — план, инструменты, проверка через ActionGate</li>
+              </ul>
+            </span>
+          </button>
+        </div>
+        <div class="seg" role="radiogroup" aria-label="Режим ответа">
+          <label class="seg-item">
+            <input type="radio" name="mode" value="rag" checked />
+            <span>Быстрый RAG</span>
+          </label>
+          <label class="seg-item">
+            <input type="radio" name="mode" value="agent" />
+            <span>Агент</span>
+          </label>
+        </div>
+        <select id="mode" class="sr-only" tabindex="-1" aria-hidden="true">
+          <option value="rag" selected>быстрый RAG</option>
           <option value="agent">агент</option>
         </select>
-      </label>
-      <label>space
-        <select id="space">
+      </div>
+
+      <div class="field">
+        <div class="field-head">
+          <span class="field-title">Пространство</span>
+          <button type="button" class="tip" aria-label="Подсказка: пространство" data-tip>
+            ?
+            <span class="tip-pop" role="tooltip">
+              Слой документов:
+              <ul>
+                <li><b>Все</b> — без фильтра (личный важнее проектного и общего)</li>
+                <li><b>Личное</b> — personal</li>
+                <li><b>Проект</b> — project</li>
+                <li><b>Общее</b> — shared (сюда попадает демо-корпус)</li>
+              </ul>
+            </span>
+          </button>
+        </div>
+        <div class="seg seg-wrap" role="radiogroup" aria-label="Пространство">
+          <label class="seg-item">
+            <input type="radio" name="space" value="all" />
+            <span>Все</span>
+          </label>
+          <label class="seg-item">
+            <input type="radio" name="space" value="personal" />
+            <span>Личное</span>
+          </label>
+          <label class="seg-item">
+            <input type="radio" name="space" value="project" />
+            <span>Проект</span>
+          </label>
+          <label class="seg-item">
+            <input type="radio" name="space" value="shared" checked />
+            <span>Общее</span>
+          </label>
+        </div>
+        <select id="space" class="sr-only" tabindex="-1" aria-hidden="true">
+          <option value="all">все</option>
           <option value="personal">personal</option>
           <option value="project">project</option>
           <option value="shared" selected>shared</option>
         </select>
-      </label>
-      <label class="muted"><input type="checkbox" id="stream" checked /> stream</label>
-      <button type="submit" class="btn">Спросить</button>
+      </div>
+
+      <div class="field field-switch">
+        <div class="field-head">
+          <span class="field-title">Потоковый вывод</span>
+          <button type="button" class="tip" aria-label="Подсказка: поток" data-tip>
+            ?
+            <span class="tip-pop tip-pop-end" role="tooltip">
+              Показывать ход работы по мере готовности:
+              <ul>
+                <li><b>Вкл</b> — шаги и текст появляются постепенно</li>
+                <li><b>Выкл</b> — один ответ в конце</li>
+              </ul>
+              На качество ответа не влияет.
+            </span>
+          </button>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="stream" checked />
+          <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+          <span class="switch-text">вкл</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button type="submit" class="btn" id="btn-ask">Спросить</button>
       <button type="button" id="btn-search" class="btn btn-ghost">Только поиск</button>
+      <p id="flow-hint" class="flow-hint muted">маршрут: общее · RAG · поток · фрагментов {{ default_top_k }}</p>
     </div>
   </form>
-  <div id="answer" class="answer hidden"></div>
-  <div id="trace-link" class="muted hidden"></div>
+
+  <div id="run-panel" class="run-panel hidden">
+    <div id="run-status" class="run-status" aria-live="polite">
+      <span class="spinner" aria-hidden="true"></span>
+      <span class="run-status-text">Готовимся…</span>
+    </div>
+    <ol id="run-steps" class="run-steps"></ol>
+    <div id="answer" class="answer hidden"></div>
+    <div id="trace-link" class="muted hidden"></div>
+  </div>
   <div id="sources" class="sources"></div>
 </section>
 {% endblock %}
 {% block scripts %}
 <script>
+  const SPACE_RU = { all: 'все', personal: 'личное', project: 'проект', shared: 'общее' };
+  function syncHidden(name, selectId) {
+    const checked = document.querySelector(`input[name="${name}"]:checked`);
+    const sel = document.getElementById(selectId);
+    if (checked && sel) sel.value = checked.value;
+  }
+  function refreshHint() {
+    syncHidden('mode', 'mode');
+    syncHidden('space', 'space');
+    const k = document.getElementById('top_k').value;
+    const mode = document.getElementById('mode').value;
+    const space = document.getElementById('space').value;
+    const streamOn = document.getElementById('stream').checked;
+    const streamLabel = document.querySelector('.switch-text');
+    if (streamLabel) streamLabel.textContent = streamOn ? 'вкл' : 'выкл';
+    document.getElementById('flow-hint').textContent =
+      `маршрут: ${SPACE_RU[space] || space} · ${mode === 'agent' ? 'агент' : 'RAG'} · ${streamOn ? 'поток' : 'одним ответом'} · фрагментов ${k}`;
+  }
+  document.querySelectorAll('input[name="mode"], input[name="space"]').forEach((el) => {
+    el.addEventListener('change', refreshHint);
+  });
+  document.getElementById('top_k').addEventListener('change', refreshHint);
+  document.getElementById('stream').addEventListener('change', refreshHint);
+  document.querySelectorAll('[data-tip]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const open = btn.classList.contains('open');
+      document.querySelectorAll('[data-tip].open').forEach((b) => b.classList.remove('open'));
+      if (!open) btn.classList.add('open');
+    });
+  });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('[data-tip]')) {
+      document.querySelectorAll('[data-tip].open').forEach((b) => b.classList.remove('open'));
+    }
+  });
+  refreshHint();
   document.getElementById('chat-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    syncHidden('mode', 'mode');
+    syncHidden('space', 'space');
     const stream = document.getElementById('stream')?.checked;
     if (stream) await PrismApp.chatStream();
     else await PrismApp.chat();
   });
-  document.getElementById('btn-search').addEventListener('click', () => PrismApp.searchOnly());
+  document.getElementById('btn-search').addEventListener('click', () => {
+    syncHidden('mode', 'mode');
+    syncHidden('space', 'space');
+    PrismApp.searchOnly();
+  });
 </script>
 {% endblock %}

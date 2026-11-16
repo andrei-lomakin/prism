@@ -30,19 +30,33 @@ def retrieve(
     top_k: int | None = None,
     settings: Settings | None = None,
     history: list[dict] | None = None,
+    space: str | None = None,
 ) -> tuple[list[RetrievedChunk], str]:
-    """Return packed chunks and retrieval_mode string (includes fallbacks)."""
+    """Return packed chunks and retrieval_mode string (includes fallbacks).
+
+    ``space``: if personal/project/shared — hard-filter hits to that space.
+    ``None`` / ``all`` / empty — search all spaces (weights still apply).
+    """
     cfg = settings or get_settings()
     k = top_k or cfg.top_k
     mode = cfg.retrieval_mode
     trace_parts = [mode]
+    space_f = (space or "").strip().lower() or None
+    if space_f in ("", "all", "*"):
+        space_f = None
 
     with span(
         "rag.retrieve",
-        attributes={"mode": mode, "top_k": k, "rewrite": cfg.rewrite_strategy},
+        attributes={"mode": mode, "top_k": k, "rewrite": cfg.rewrite_strategy, "space": space_f},
     ):
         return _retrieve_inner(
-            db, query, top_k=k, settings=cfg, history=history, trace_parts=trace_parts
+            db,
+            query,
+            top_k=k,
+            settings=cfg,
+            history=history,
+            trace_parts=trace_parts,
+            space=space_f,
         )
 
 
@@ -54,6 +68,7 @@ def _retrieve_inner(
     settings: Settings,
     history: list[dict] | None,
     trace_parts: list[str],
+    space: str | None = None,
 ) -> tuple[list[RetrievedChunk], str]:
     cfg = settings
     k = top_k
@@ -127,6 +142,10 @@ def _retrieve_inner(
     if cfg.space_weights_enabled:
         hits = apply_space_weights(hits, space_weights_from_settings(cfg))
         trace_parts.append("space_weights")
+
+    if space:
+        hits = [h for h in hits if (h.space or "personal") == space]
+        trace_parts.append(f"space:{space}")
 
     with span(
         "rag.pack",

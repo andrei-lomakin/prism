@@ -2,14 +2,14 @@
 {% block title %}Трасса · Prism{% endblock %}
 {% block content %}
 <section class="panel">
-  <h1>Трасса рана</h1>
-  <p class="muted">Шаги AgentRun из БД и/или in-process OTel buffer spans.</p>
+  <h1>Трасса запуска</h1>
+  <p class="lede muted">Шаги агента из БД и/или spans из буфера трассировки.</p>
   <form id="trace-form" class="row stack">
-    <label>run_id <input id="run_id" value="{{ run_id }}" placeholder="42" /></label>
-    <label>trace_id <input id="trace_id" value="{{ trace_id }}" placeholder="hex" /></label>
+    <label>ID запуска <input id="run_id" value="{{ run_id }}" placeholder="42" /></label>
+    <label>ID трассы <input id="trace_id" value="{{ trace_id }}" placeholder="hex" /></label>
     <button type="submit" class="btn">Загрузить</button>
   </form>
-  <pre id="trace-out" class="answer">Укажите run_id или trace_id.</pre>
+  <pre id="trace-out" class="answer">Укажите ID запуска или трассы.</pre>
 </section>
 {% endblock %}
 {% block scripts %}
@@ -19,7 +19,7 @@
     const runId = document.getElementById('run_id').value.trim();
     const traceId = document.getElementById('trace_id').value.trim();
     const out = document.getElementById('trace-out');
-    out.textContent = '…';
+    out.textContent = 'Загрузка…';
     try {
       let data = {};
       if (runId) {

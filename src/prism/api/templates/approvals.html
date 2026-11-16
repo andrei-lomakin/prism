@@ -3,7 +3,7 @@
 {% block content %}
 <section class="panel">
   <h1>Очередь одобрений</h1>
-  <p class="muted">ActionGate ask/on_request — TTL из настроек (default 300s).</p>
+  <p class="lede muted">Действия ActionGate в режиме «спросить» / «по запросу». TTL из настроек (по умолчанию 300 с).</p>
   <button type="button" id="btn-refresh" class="btn">Обновить</button>
   <div id="list" class="stack" style="margin-top:1rem"></div>
 </section>
@@ -12,18 +12,18 @@
 <script>
   async function loadApprovals() {
     const box = document.getElementById('list');
-    box.innerHTML = '…';
+    box.innerHTML = '<span class="spinner inline"></span> Загрузка…';
     const r = await fetch('/api/approvals');
     const data = await r.json();
     if (!data.items.length) {
-      box.innerHTML = '<p class="muted">Пусто — нет pending действий.</p>';
+      box.innerHTML = '<p class="muted">Пусто — нет ожидающих действий.</p>';
       return;
     }
     box.innerHTML = '';
     for (const a of data.items) {
       const el = document.createElement('div');
       el.className = 'answer';
-      el.innerHTML = `<div><b>${a.id}</b> · ${a.tool} · run=${a.run_id ?? '—'}</div>
+      el.innerHTML = `<div><b>${a.id}</b> · инструмент ${a.tool} · запуск=${a.run_id ?? '—'}</div>
         <pre style="white-space:pre-wrap">${JSON.stringify(a.args, null, 2)}</pre>
         <div class="row">
           <button class="btn" data-act="ok">Одобрить</button>

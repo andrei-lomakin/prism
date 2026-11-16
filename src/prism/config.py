@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     top_k: int = Field(default=5, ge=1, le=50)
     retrieval_mode: RetrievalMode = "dense"
     space_default: SpaceName = "personal"
+    # Runtime filter from chat UI (None = all spaces). Not a durable .env knob.
+    space_filter: str | None = None
 
     # Hybrid / rewrite / rerank (Stage 3)
     hybrid_fusion: HybridFusion = "rrf"

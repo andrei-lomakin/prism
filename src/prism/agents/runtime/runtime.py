@@ -86,6 +86,7 @@ class AgentRuntime:
         policy: PolicyBundle | None = None,
         approval_fn: Callable[..., bool] | None = None,
         persist: bool = True,
+        on_step: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.db = db
         self.settings = settings or get_settings()
@@ -98,6 +99,7 @@ class AgentRuntime:
         self.limits = LimitTracker(self.budget)
         self.persist = persist and db is not None
         self._llm = llm
+        self._on_step = on_step
         self._steps: list[dict[str, Any]] = []
         self._step_n = 0
 
@@ -673,6 +675,16 @@ class AgentRuntime:
                         output=out if isinstance(out, dict) else {"value": out},
                     )
                 )
+                # Flush so UI can see steps while the run is still in progress
+                try:
+                    self.db.flush()
+                except Exception:  # noqa: BLE001
+                    pass
+        if self._on_step is not None:
+            try:
+                self._on_step(rec)
+            except Exception:  # noqa: BLE001 — UI callback must not kill the run
+                pass
 
     def _commit(self) -> None:
         if self.persist and self.db is not None:

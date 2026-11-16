@@ -78,6 +78,7 @@ class JobOut(BaseModel):
 class SearchRequest(BaseModel):
     query: str = Field(..., min_length=1)
     top_k: int | None = Field(default=None, ge=1, le=50)
+    space: Literal["all", "personal", "project", "shared"] = "all"
 
 
 class SearchHit(BaseModel):
@@ -100,6 +101,7 @@ class ChatRequest(BaseModel):
     query: str = Field(..., min_length=1)
     top_k: int | None = Field(default=None, ge=1, le=50)
     mode: Literal["rag", "agent"] = "rag"
+    space: Literal["all", "personal", "project", "shared"] = "all"
 
 
 class Citation(BaseModel):

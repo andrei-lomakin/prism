@@ -73,7 +73,13 @@ def build_default_registry(ctx: ToolContext) -> ToolRegistry:
             ]
             ctx.last_hits = hits
             return {"hits": hits, "retrieval_mode": "mock", "query": query}
-        hits, mode = retrieve(ctx.db, query, top_k=top_k, settings=ctx.settings)
+        hits, mode = retrieve(
+            ctx.db,
+            query,
+            top_k=top_k,
+            settings=ctx.settings,
+            space=ctx.settings.space_filter,
+        )
         packed = [
             {
                 "chunk_id": h.chunk_id,

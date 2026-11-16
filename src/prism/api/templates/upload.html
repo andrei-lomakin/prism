@@ -2,25 +2,34 @@
 {% block title %}База · Prism{% endblock %}
 {% block content %}
 <section class="panel">
-  <h1>Загрузка документов</h1>
-  <p class="muted">PDF, DOCX, TXT, MD, HTML или URL. Индексация идёт в worker.</p>
+  <h1>База документов</h1>
+  <p class="lede muted">PDF, DOCX, TXT, MD, HTML или URL. Индексация идёт в фоне (worker).</p>
 
-  <form id="upload-form" class="stack">
+  <label class="field" style="margin-top:1rem">
+    <div class="field-head"><span class="field-title">Пространство загрузки</span></div>
+    <select id="upload-space">
+      <option value="personal">Личное</option>
+      <option value="project">Проект</option>
+      <option value="shared" selected>Общее (демо)</option>
+    </select>
+  </label>
+
+  <form id="upload-form" class="stack" style="margin-top:1rem">
     <input type="file" id="file" accept=".pdf,.docx,.txt,.md,.html,.htm" required />
     <button type="submit" class="btn">Загрузить файл</button>
   </form>
 
   <form id="url-form" class="stack" style="margin-top:1.5rem">
     <input type="url" id="url" placeholder="https://…" required />
-    <button type="submit" class="btn btn-ghost">Загрузить URL</button>
+    <button type="submit" class="btn btn-ghost">Загрузить по ссылке</button>
   </form>
 
   <div id="job-status" class="muted" style="margin-top:1rem"></div>
 
   <h2 style="margin-top:2rem">Документы</h2>
   <div id="docs"></div>
-  <h2 style="margin-top:2rem">Превью чанков</h2>
-  <div id="chunk-preview" class="muted">Выберите документ → «Чанки»</div>
+  <h2 style="margin-top:2rem">Превью фрагментов</h2>
+  <div id="chunk-preview" class="muted">Выберите документ → «Фрагменты»</div>
 </section>
 {% endblock %}
 {% block scripts %}
