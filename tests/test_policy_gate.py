@@ -59,16 +59,7 @@ def test_ask_runs_with_approval_fn():
 
 
 def test_locked_rule_cannot_weaken():
-    bundle = load_policy()
-    # search_kb is locked auto — proposing ask is OK (tighten), proposing... wait
-    # weaken = auto → something less restrictive? Strength: auto=0, ask=2
-    # weaken means proposed strength < existing → auto is weakest execute-wise
-    # "cannot weaken locked" means cannot make it more permissive.
-    # auto is most permissive. So ask→auto would weaken if locked was ask.
-    # For locked auto, overlaying with ask is tightening (allowed by merge).
-    # Overlaying locked auto with... there's nothing more permissive than auto.
-    # So test propose_rule: take web_search ask locked=false, lock it... 
-    # Better: locked ask cannot become auto
+    # Locked ask cannot be weakened to auto via agent overlay.
     locked = merge_rules(
         {
             "system": [

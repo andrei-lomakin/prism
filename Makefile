@@ -30,6 +30,7 @@ eval-baseline:
 demo: up golden
 	@echo "Open http://127.0.0.1:8000 — then: make ingest-demo (needs Postgres)"
 
+# Prefer `just check` / `just fix` (see justfile). Makefile kept for parity.
 test:
 	pytest -q
 
@@ -38,3 +39,8 @@ lint:
 
 format:
 	ruff format src tests
+
+check:
+	ruff format --check src tests
+	ruff check src tests
+	pytest -q

@@ -84,7 +84,7 @@ class BM25Store:
         idxs = np.asarray(docs[0]).tolist()
         sc = np.asarray(scores[0]).tolist()
         out: list[tuple[str, float]] = []
-        for i, s in zip(idxs, sc):
+        for i, s in zip(idxs, sc, strict=False):
             if i is None or int(i) < 0 or int(i) >= len(self._ids):
                 continue
             out.append((self._ids[int(i)], float(s)))

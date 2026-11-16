@@ -47,7 +47,9 @@ def _weaken(existing: Mode, proposed: Mode) -> bool:
     return _MODE_STRENGTH[proposed] < _MODE_STRENGTH[existing]
 
 
-def merge_rules(layers: dict[str, list[dict[str, Any]]], *, default_mode: Mode = "ask") -> PolicyBundle:
+def merge_rules(
+    layers: dict[str, list[dict[str, Any]]], *, default_mode: Mode = "ask"
+) -> PolicyBundle:
     """Merge system → workspace → agent. Locked rules reject weakening overlays."""
     bundle = PolicyBundle(default_mode=default_mode)
     by_tool: dict[str, PolicyRule] = {}
@@ -125,8 +127,12 @@ def apply_overlay(
     merged.version = bundle.version
     # Detect reject via unchanged mode when weaken attempted
     after = merged.rule_for(tool)
-    if existing and existing.locked and after and after.mode == existing.mode and _weaken(
-        existing.mode, mode
+    if (
+        existing
+        and existing.locked
+        and after
+        and after.mode == existing.mode
+        and _weaken(existing.mode, mode)
     ):
         return bundle, False, f"locked rule {existing.id} cannot be weakened to {mode}"
     return merged, True, "applied"

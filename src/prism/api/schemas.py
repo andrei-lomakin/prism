@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -21,16 +21,16 @@ class SettingsOut(BaseModel):
 
 
 class SettingsUpdate(BaseModel):
-    embedding_model: Optional[str] = None
-    chunking_strategy: Optional[str] = None
-    chunk_size: Optional[int] = Field(default=None, ge=32, le=4096)
-    chunk_overlap: Optional[int] = Field(default=None, ge=0, le=1024)
-    top_k: Optional[int] = Field(default=None, ge=1, le=50)
-    retrieval_mode: Optional[Literal["dense", "lexical", "hybrid"]] = None
-    llm_provider: Optional[Literal["ollama", "openai_compatible"]] = None
-    llm_model: Optional[str] = None
-    ollama_base_url: Optional[str] = None
-    space_default: Optional[Literal["personal", "project", "shared"]] = None
+    embedding_model: str | None = None
+    chunking_strategy: str | None = None
+    chunk_size: int | None = Field(default=None, ge=32, le=4096)
+    chunk_overlap: int | None = Field(default=None, ge=0, le=1024)
+    top_k: int | None = Field(default=None, ge=1, le=50)
+    retrieval_mode: Literal["dense", "lexical", "hybrid"] | None = None
+    llm_provider: Literal["ollama", "openai_compatible"] | None = None
+    llm_model: str | None = None
+    ollama_base_url: str | None = None
+    space_default: Literal["personal", "project", "shared"] | None = None
 
 
 class UrlIngestRequest(BaseModel):
@@ -48,11 +48,11 @@ class DocumentOut(BaseModel):
     name: str
     source_type: str
     source_path: str
-    source_url: Optional[str] = None
+    source_url: str | None = None
     space: str
     status: str
     num_chunks: int
-    error_message: Optional[str] = None
+    error_message: str | None = None
     created_at: str
     updated_at: str
 
@@ -71,13 +71,13 @@ class JobOut(BaseModel):
     kind: str
     status: str
     progress: int
-    current_step: Optional[str] = None
-    error_message: Optional[str] = None
+    current_step: str | None = None
+    error_message: str | None = None
 
 
 class SearchRequest(BaseModel):
     query: str = Field(..., min_length=1)
-    top_k: Optional[int] = Field(default=None, ge=1, le=50)
+    top_k: int | None = Field(default=None, ge=1, le=50)
 
 
 class SearchHit(BaseModel):
@@ -86,8 +86,8 @@ class SearchHit(BaseModel):
     document_name: str
     text: str
     score: float
-    section_path: Optional[str] = None
-    page: Optional[int] = None
+    section_path: str | None = None
+    page: int | None = None
 
 
 class SearchResponse(BaseModel):
@@ -98,7 +98,7 @@ class SearchResponse(BaseModel):
 
 class ChatRequest(BaseModel):
     query: str = Field(..., min_length=1)
-    top_k: Optional[int] = Field(default=None, ge=1, le=50)
+    top_k: int | None = Field(default=None, ge=1, le=50)
     mode: Literal["rag", "agent"] = "rag"
 
 
@@ -107,8 +107,8 @@ class Citation(BaseModel):
     chunk_id: int
     doc_id: int
     title: str
-    section_path: Optional[str] = None
-    page: Optional[int] = None
+    section_path: str | None = None
+    page: int | None = None
     score: float
 
 
@@ -127,7 +127,7 @@ class ChatResponse(BaseModel):
     retrieval_mode: str
     grounding_ok: bool
     usage: UsageOut
-    trace_id: Optional[str] = None
+    trace_id: str | None = None
 
 
 class HealthResponse(BaseModel):

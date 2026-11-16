@@ -148,7 +148,9 @@ def _chunk_structure_aware(text: str, max_size: int, overlap: int) -> list[Chunk
     return out
 
 
-def _chunk_semantic(text: str, max_size: int, overlap: int, *, threshold: float = 0.15) -> list[ChunkPiece]:
+def _chunk_semantic(
+    text: str, max_size: int, overlap: int, *, threshold: float = 0.15
+) -> list[ChunkPiece]:
     """Boundary where Jaccard similarity between adjacent sentences drops."""
     sents = [s.strip() for s in _SENTENCE_SPLIT.split(text) if s.strip()]
     if len(sents) <= 1:
@@ -158,7 +160,7 @@ def _chunk_semantic(text: str, max_size: int, overlap: int, *, threshold: float 
         return {t.lower() for t in re.findall(r"[a-zA-Zа-яА-ЯёЁ0-9]{3,}", s)}
 
     groups: list[list[str]] = [[sents[0]]]
-    for prev, cur in zip(sents, sents[1:]):
+    for prev, cur in zip(sents, sents[1:], strict=False):
         a, b = toks(prev), toks(cur)
         sim = (len(a & b) / len(a | b)) if (a or b) else 1.0
         if sim < threshold:
@@ -169,11 +171,7 @@ def _chunk_semantic(text: str, max_size: int, overlap: int, *, threshold: float 
     pieces: list[ChunkPiece] = []
     for g in groups:
         block = " ".join(g)
-        parts = (
-            _chunk_by_words(block, max_size, overlap)
-            if len(block) > max_size
-            else [block]
-        )
+        parts = _chunk_by_words(block, max_size, overlap) if len(block) > max_size else [block]
         for c in parts:
             pieces.append(
                 ChunkPiece(text=c, meta={"strategy": "C6", "semantic_threshold": threshold})

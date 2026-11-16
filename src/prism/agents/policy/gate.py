@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Literal
+from typing import Any
 
 from prism.agents.policy.audit import AuditLog
 from prism.agents.policy.rules import Mode, PolicyBundle, load_policy

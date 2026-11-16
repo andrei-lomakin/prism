@@ -21,7 +21,12 @@ from prism.api.schemas import (
 from prism.config import get_settings
 from prism.db.models import Document, Job
 from prism.db.session import get_db
-from prism.ingest.parsers import ALLOWED_EXTENSIONS, download_url_to_file, safe_filename, suggest_name_from_url
+from prism.ingest.parsers import (
+    ALLOWED_EXTENSIONS,
+    download_url_to_file,
+    safe_filename,
+    suggest_name_from_url,
+)
 
 router = APIRouter(prefix="/api", tags=["documents"])
 
@@ -61,7 +66,9 @@ async def upload_document(
         raise HTTPException(400, "Empty filename")
     suffix = Path(file.filename).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
-        raise HTTPException(400, f"Unsupported type {suffix}. Allowed: {sorted(ALLOWED_EXTENSIONS)}")
+        raise HTTPException(
+            400, f"Unsupported type {suffix}. Allowed: {sorted(ALLOWED_EXTENSIONS)}"
+        )
 
     settings = get_settings()
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
@@ -121,14 +128,19 @@ async def ingest_url(payload: UrlIngestRequest, db: Session = Depends(get_db)) -
 
 
 @router.get("/documents", response_model=DocumentListResponse)
-def list_documents(page: int = 1, page_size: int = 10, db: Session = Depends(get_db)) -> DocumentListResponse:
+def list_documents(
+    page: int = 1, page_size: int = 10, db: Session = Depends(get_db)
+) -> DocumentListResponse:
     page = max(1, page)
     page_size = max(1, min(page_size, 100))
     total = db.scalar(select(func.count()).select_from(Document)) or 0
     pages = max(1, (total + page_size - 1) // page_size) if total else 1
     page = min(page, pages)
     rows = db.scalars(
-        select(Document).order_by(Document.id.desc()).offset((page - 1) * page_size).limit(page_size)
+        select(Document)
+        .order_by(Document.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     ).all()
     return DocumentListResponse(
         items=[_doc_out(d) for d in rows],

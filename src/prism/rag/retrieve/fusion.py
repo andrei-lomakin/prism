@@ -40,9 +40,7 @@ def weighted_fuse(
             key: alpha * dense.get(key, 0.0) + (1.0 - alpha) * lex.get(key, 0.0) for key in keys
         }
     else:
-        fused = {
-            key: sum(m.get(key, 0.0) for m in norms) / len(norms) for key in keys
-        }
+        fused = {key: sum(m.get(key, 0.0) for m in norms) / len(norms) for key in keys}
     return sorted(fused.items(), key=lambda x: x[1], reverse=True)
 
 

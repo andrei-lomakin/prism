@@ -55,7 +55,9 @@ class Document(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    chunks: Mapped[list[Chunk]] = relationship(back_populates="document", cascade="all, delete-orphan")
+    chunks: Mapped[list[Chunk]] = relationship(
+        back_populates="document", cascade="all, delete-orphan"
+    )
     jobs: Mapped[list[Job]] = relationship(back_populates="document", cascade="all, delete-orphan")
 
 
@@ -63,7 +65,9 @@ class Chunk(Base):
     __tablename__ = "chunks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    document_id: Mapped[int] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), index=True)
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), index=True
+    )
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     token_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -83,7 +87,9 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    document_id: Mapped[int] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), index=True)
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), index=True
+    )
     kind: Mapped[str] = mapped_column(String(64), default="ingest", nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="queued", nullable=False)
     progress: Mapped[int] = mapped_column(Integer, default=0)
@@ -137,7 +143,9 @@ class Step(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     run_id: Mapped[int] = mapped_column(ForeignKey("agent_runs.id", ondelete="CASCADE"), index=True)
     n: Mapped[int] = mapped_column(Integer, nullable=False)
-    kind: Mapped[str] = mapped_column(String(32), nullable=False)  # llm | tool | approval | delegation
+    kind: Mapped[str] = mapped_column(
+        String(32), nullable=False
+    )  # llm | tool | approval | delegation
     input: Mapped[dict] = mapped_column(JSONB, default=dict)
     output: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     tokens: Mapped[int] = mapped_column(Integer, default=0)
@@ -158,6 +166,8 @@ class MemoryEntry(Base):
     key: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     active: Mapped[bool] = mapped_column(default=True)
-    supersedes_id: Mapped[int | None] = mapped_column(ForeignKey("memory_entries.id"), nullable=True)
+    supersedes_id: Mapped[int | None] = mapped_column(
+        ForeignKey("memory_entries.id"), nullable=True
+    )
     meta: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

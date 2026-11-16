@@ -96,12 +96,7 @@ def judge_answer(
         )
 
     ctx_block = "\n\n".join(f"[{i}] {c}" for i, c in enumerate(contexts, start=1)) or "(empty)"
-    user = (
-        f"QUESTION:\n{question}\n\n"
-        f"CONTEXT:\n{ctx_block}\n\n"
-        f"ANSWER:\n{answer}\n\n"
-        "Return JSON."
-    )
+    user = f"QUESTION:\n{question}\n\nCONTEXT:\n{ctx_block}\n\nANSWER:\n{answer}\n\nReturn JSON."
     try:
         gateway = LLMGateway(settings)
         result = gateway.chat(

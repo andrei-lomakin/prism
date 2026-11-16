@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from time import perf_counter
-from typing import Any, Callable
+from typing import Any
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
@@ -483,9 +484,7 @@ class AgentRuntime:
         )
 
     @staticmethod
-    def _heuristic_answer(
-        objective: str, hits: list[dict[str, Any]], *, partial: bool
-    ) -> str:
+    def _heuristic_answer(objective: str, hits: list[dict[str, Any]], *, partial: bool) -> str:
         if not hits:
             msg = "В базе нет релевантного контекста для ответа."
             return f"[частичный ответ — бюджет исчерпан]\n{msg}" if partial else msg

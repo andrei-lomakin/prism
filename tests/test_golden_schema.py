@@ -1,4 +1,4 @@
-from prism.eval.golden_build import assign_splits, build, expand_seeds, _seeds
+from prism.eval.golden_build import _seeds, assign_splits, build, expand_seeds
 from prism.eval.schema import GoldenQuestion, RelevantDoc
 
 

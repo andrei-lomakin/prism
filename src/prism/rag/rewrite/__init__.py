@@ -55,9 +55,7 @@ def _r1_condense(query: str, history: list[dict], settings: Settings) -> dict[st
             "queries": [query],
         }
     # Cheap deterministic condense without LLM when history is short
-    prior = " ".join(
-        f"{m.get('role', 'user')}: {m.get('content', '')}" for m in history[-4:]
-    )
+    prior = " ".join(f"{m.get('role', 'user')}: {m.get('content', '')}" for m in history[-4:])
     try:
         from prism.llm.gateway import LLMGateway
 
@@ -129,14 +127,17 @@ def _r3_hyde(query: str, settings: Settings) -> dict[str, Any]:
         from prism.llm.gateway import LLMGateway
 
         gw = LLMGateway(settings)
-        hypo = gw.chat(
-            user_message=(
-                "Write a short hypothetical answer passage (3-5 sentences) "
-                f"that would contain evidence for: {query}"
-            ),
-            system_prompt="Write only the passage.",
-            temperature=0.3,
-        ).text.strip() or query
+        hypo = (
+            gw.chat(
+                user_message=(
+                    "Write a short hypothetical answer passage (3-5 sentences) "
+                    f"that would contain evidence for: {query}"
+                ),
+                system_prompt="Write only the passage.",
+                temperature=0.3,
+            ).text.strip()
+            or query
+        )
     except Exception:
         hypo = f"The answer discusses {query} with definitions, steps, and examples."
     return {

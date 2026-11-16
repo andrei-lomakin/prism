@@ -130,12 +130,19 @@ Default models: embedder `paraphrase-multilingual-MiniLM-L12-v2`, chat `qwen3:4b
 
 ---
 
-## Tests
+## Lint / format / test
+
+Requires [just](https://github.com/casey/just) (`winget install just` / `cargo install just`).
 
 ```bash
-pytest -q
-ruff check src tests
+just check      # fmt-check + lint + pytest
+just fix        # ruff format + lint --fix
+just test       # pytest -q
+just lint       # ruff check
+just fmt        # ruff format
 ```
+
+Without just: `ruff check src tests`, `ruff format src tests`, `pytest -q`.
 
 ---
 

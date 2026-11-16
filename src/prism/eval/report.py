@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -11,7 +11,7 @@ REPORTS = ROOT / "reports"
 
 
 def new_run_id(name: str) -> str:
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     safe = re_sub_name(name)
     return f"{ts}_{safe}"
 
@@ -56,9 +56,7 @@ def _markdown(summary: dict) -> str:
         if key not in ret:
             continue
         m = ret[key]
-        lines.append(
-            f"| {key} | {m['mean']:.4f} | [{m['ci95_lo']:.4f}, {m['ci95_hi']:.4f}] |"
-        )
+        lines.append(f"| {key} | {m['mean']:.4f} | [{m['ci95_lo']:.4f}, {m['ci95_hi']:.4f}] |")
     lines += ["", "## Generation", ""]
     gen = summary.get("generation", {})
     if not gen:
@@ -72,9 +70,7 @@ def _markdown(summary: dict) -> str:
             if key not in gen:
                 continue
             m = gen[key]
-            lines.append(
-                f"| {key} | {m['mean']:.4f} | [{m['ci95_lo']:.4f}, {m['ci95_hi']:.4f}] |"
-            )
+            lines.append(f"| {key} | {m['mean']:.4f} | [{m['ci95_lo']:.4f}, {m['ci95_hi']:.4f}] |")
     ops = summary.get("ops", {})
     lines += [
         "",

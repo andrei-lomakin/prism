@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -98,7 +99,9 @@ def build_default_registry(ctx: ToolContext) -> ToolRegistry:
             "name": doc.name,
             "space": doc.space,
             "status": doc.status,
-            "chunks": [{"id": c.id, "text": c.text[:500], "section_path": c.section_path} for c in chunks],
+            "chunks": [
+                {"id": c.id, "text": c.text[:500], "section_path": c.section_path} for c in chunks
+            ],
         }
 
     def rewrite_query(query: str, strategy: str | None = None) -> dict[str, Any]:
@@ -128,8 +131,7 @@ def build_default_registry(ctx: ToolContext) -> ToolRegistry:
         hits = ctx.memory.recall(query, layers=layers)
         return {
             "hits": [
-                {"id": h.id, "layer": h.layer, "key": h.key, "content": h.content}
-                for h in hits
+                {"id": h.id, "layer": h.layer, "key": h.key, "content": h.content} for h in hits
             ]
         }
 
@@ -159,7 +161,11 @@ def build_default_registry(ctx: ToolContext) -> ToolRegistry:
         bundle = ctx.get_policy()
         rid = rule_id or f"agent.propose.{tool}"
         new_bundle, ok, reason = apply_overlay(
-            bundle, tool=tool, mode=mode, rule_id=rid, layer="agent"  # type: ignore[arg-type]
+            bundle,
+            tool=tool,
+            mode=mode,
+            rule_id=rid,
+            layer="agent",  # type: ignore[arg-type]
         )
         if ok:
             ctx.set_policy(new_bundle)

@@ -217,7 +217,10 @@ def _seeds() -> list[dict]:
         type="comparison",
         question="Compare fixed windows versus paragraph packing for chunking.",
         gold_answer="Fixed windows are simple sliding budgets; paragraph packing preserves linguistic boundaries better than naive character cuts.",
-        docs=_rd(("03_chunking_en", "Fixed Windows"), ("04_chunking_ru", "Упаковка абзацев и предложений")),
+        docs=_rd(
+            ("03_chunking_en", "Fixed Windows"),
+            ("04_chunking_ru", "Упаковка абзацев и предложений"),
+        ),
         reviewed=True,
     )
     add(
@@ -264,7 +267,9 @@ def _seeds() -> list[dict]:
         type="multi-hop",
         question="How does a typical RAG pipeline connect to retrieval metrics like Recall@k?",
         gold_answer="The pipeline retrieves top-k chunks; Recall@k and related metrics evaluate whether the relevant evidence appears in that ranking before generation.",
-        docs=_rd(("01_rag_overview_en", "Typical Pipeline"), ("11_eval_metrics_en", "Retrieval Metrics")),
+        docs=_rd(
+            ("01_rag_overview_en", "Typical Pipeline"), ("11_eval_metrics_en", "Retrieval Metrics")
+        ),
         reviewed=True,
     )
     add(
@@ -285,7 +290,10 @@ def _seeds() -> list[dict]:
         type="multi-hop",
         question="If you change the embedding model, what must happen in a pgvector deployment?",
         gold_answer="Do not mix geometries: re-index fully, keep embedding_model on chunks, and migrate the vector column if dimensionality changes.",
-        docs=_rd(("05_embeddings_en", "Mixing Models is Forbidden"), ("15_pgvector_en", "Operational Notes")),
+        docs=_rd(
+            ("05_embeddings_en", "Mixing Models is Forbidden"),
+            ("15_pgvector_en", "Operational Notes"),
+        ),
         reviewed=True,
     )
     add(
@@ -303,7 +311,10 @@ def _seeds() -> list[dict]:
         type="multi-hop",
         question="How do citation checks relate to faithfulness evaluation?",
         gold_answer="Citation checks verify [n] targets; faithfulness estimates whether claims are supported by context — both fight hallucinations and are reported in metrics.",
-        docs=_rd(("17_grounding_en", "Post-Generation Checks"), ("11_eval_metrics_en", "Generation Metrics")),
+        docs=_rd(
+            ("17_grounding_en", "Post-Generation Checks"),
+            ("11_eval_metrics_en", "Generation Metrics"),
+        ),
         reviewed=True,
     )
     add(
@@ -312,7 +323,10 @@ def _seeds() -> list[dict]:
         type="multi-hop",
         question="Как связаны ошибки чанкинга и качество RAG-ответа?",
         gold_answer="Плохие границы чанков — типичный failure mode RAG; стратегии вроде packing/structure-aware как раз уменьшают разрыв контекста перед генерацией.",
-        docs=_rd(("02_rag_overview_ru", "Типичные ошибки"), ("04_chunking_ru", "Упаковка абзацев и предложений")),
+        docs=_rd(
+            ("02_rag_overview_ru", "Типичные ошибки"),
+            ("04_chunking_ru", "Упаковка абзацев и предложений"),
+        ),
         reviewed=True,
     )
     add(
@@ -321,7 +335,9 @@ def _seeds() -> list[dict]:
         type="multi-hop",
         question="Name one rank-fusion method and one weighted-score alternative used in hybrid search ablations.",
         gold_answer="RRF with k=60, and a weighted sum of normalized scores with α in {0.5, 0.72, 0.75, 0.9}.",
-        docs=_rd(("07_hybrid_search_en", "Hybrid Fusion"), ("19_numeric_baselines_en", "Fusion Weights")),
+        docs=_rd(
+            ("07_hybrid_search_en", "Hybrid Fusion"), ("19_numeric_baselines_en", "Fusion Weights")
+        ),
         reviewed=True,
     )
 
@@ -389,7 +405,9 @@ _PARAPHRASE_RU = [
 ]
 
 
-def expand_seeds(seeds: list[dict], *, target: int = 240, rng: random.Random | None = None) -> list[GoldenQuestion]:
+def expand_seeds(
+    seeds: list[dict], *, target: int = 240, rng: random.Random | None = None
+) -> list[GoldenQuestion]:
     """Expand seeds with paraphrases while keeping type quotas.
 
     Quotas (TZ Stage 1): unanswerable ≥10%, multi-hop ≥15%.
@@ -453,7 +471,9 @@ def expand_seeds(seeds: list[dict], *, target: int = 240, rng: random.Random | N
     return items[:target]
 
 
-def assign_splits(items: list[GoldenQuestion], *, test_ratio: float = 0.3, rng: random.Random | None = None) -> None:
+def assign_splits(
+    items: list[GoldenQuestion], *, test_ratio: float = 0.3, rng: random.Random | None = None
+) -> None:
     """Stratified-ish split by type; hyperparameters must not be tuned on test."""
     rng = rng or random.Random(42)
     by_type: dict[str, list[GoldenQuestion]] = {}
@@ -494,8 +514,12 @@ def build(target: int = 240) -> dict:
             "by_type": dict(Counter(x.type for x in xs)),
             "by_lang": dict(Counter(x.language for x in xs)),
             "reviewed": sum(1 for x in xs if x.reviewed),
-            "unanswerable_pct": round(100 * sum(1 for x in xs if x.type == "unanswerable") / max(1, len(xs)), 1),
-            "multihop_pct": round(100 * sum(1 for x in xs if x.type == "multi-hop") / max(1, len(xs)), 1),
+            "unanswerable_pct": round(
+                100 * sum(1 for x in xs if x.type == "unanswerable") / max(1, len(xs)), 1
+            ),
+            "multihop_pct": round(
+                100 * sum(1 for x in xs if x.type == "multi-hop") / max(1, len(xs)), 1
+            ),
         }
 
     summary = {
@@ -505,5 +529,7 @@ def build(target: int = 240) -> dict:
         "test": stats(test),
         "all": stats(items),
     }
-    (OUT_DIR / "stats.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    (OUT_DIR / "stats.json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     return summary

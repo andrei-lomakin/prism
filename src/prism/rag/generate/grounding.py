@@ -47,17 +47,9 @@ def check_grounding(
 
     if sources and cited and not missing:
         # Strip citation markers before extracting entities
+        # Numbers/names in the answer must appear in the union of cited chunks.
         clean = _CITE_RE.sub(" ", answer)
-        for n_idx in cited:
-            if n_idx < 1 or n_idx > len(sources):
-                continue
-            chunk = sources[n_idx - 1]
-            chunk_l = chunk.lower()
-            # numbers near this citation: take sentence containing [n]
-            # simpler: all numbers in answer must appear in union of cited chunks
-        cited_text = " ".join(
-            sources[i - 1] for i in cited if 1 <= i <= len(sources)
-        ).lower()
+        cited_text = " ".join(sources[i - 1] for i in cited if 1 <= i <= len(sources)).lower()
         for num in _NUM_RE.findall(clean):
             if num.lower() not in cited_text and num not in cited_text:
                 unsupported_numbers.append(num)

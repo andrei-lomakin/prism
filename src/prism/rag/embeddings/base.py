@@ -10,7 +10,6 @@ import hashlib
 import logging
 from abc import ABC, abstractmethod
 from functools import lru_cache
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +61,9 @@ class SentenceTransformerEmbedder(Embedder):
         logger.info("Loading embedding model %s", model_name)
         self.model_name = model_name
         self._model = SentenceTransformer(model_name)
-        dim_fn = getattr(self._model, "get_embedding_dimension", None) or getattr(
-            self._model, "get_sentence_embedding_dimension"
+        dim_fn = (
+            getattr(self._model, "get_embedding_dimension", None)
+            or self._model.get_sentence_embedding_dimension
         )
         self.dim = int(dim_fn())
         self._cache: dict[str, list[float]] = {}

@@ -12,7 +12,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from prism.api.routes import chat, documents, settings as settings_routes
+from prism.api.routes import chat, documents
+from prism.api.routes import settings as settings_routes
 from prism.api.settings_store import get_effective_settings
 from prism.db.session import get_db, init_db
 

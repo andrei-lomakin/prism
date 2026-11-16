@@ -40,7 +40,11 @@ def run_ingest(db: Session, job_id: int) -> None:
         # Idempotent reindex: compare hash BEFORE flipping status to indexing.
         prev_hash = doc.content_hash
         prev_chunks = doc.num_chunks or 0
-        if prev_hash == digest and prev_chunks > 0 and doc.status in ("indexed", "pending", "indexing"):
+        if (
+            prev_hash == digest
+            and prev_chunks > 0
+            and doc.status in ("indexed", "pending", "indexing")
+        ):
             # Only skip when we already have vectors for this exact content.
             has_chunks = len(doc.chunks) > 0 if doc.chunks is not None else prev_chunks > 0
             if has_chunks and doc.status == "indexed":
