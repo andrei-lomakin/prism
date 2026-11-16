@@ -13,7 +13,8 @@ from sqlalchemy.orm import Session
 from prism.agents.memory import MemoryStore
 from prism.agents.policy import ActionGate, PolicyBundle, load_policy
 from prism.agents.policy.audit import AuditLog
-from prism.agents.roles import run_critic, run_retriever
+from prism.agents.roles import run_analyst, run_critic, run_retriever, run_web
+from prism.agents.runtime.bus import get_bus
 from prism.agents.runtime.limits import LimitTracker, RunBudget
 from prism.agents.runtime.subagents import ChildRun, SubagentManager
 from prism.agents.runtime.triage import TriageResult, triage
@@ -185,7 +186,10 @@ class AgentRuntime:
         hits: list[dict[str, Any]] = []
         retrieval_mode = "none"
         critic_report: dict[str, Any] | None = None
+        analyst_report: dict[str, Any] | None = None
+        web_report: dict[str, Any] | None = None
         awaiting = False
+        approval_id: str | None = None
 
         try:
             if role == "retriever":
@@ -199,8 +203,28 @@ class AgentRuntime:
                 hits = list(out.get("hits") or [])
                 retrieval_mode = str(out.get("retrieval_mode") or "retriever")
                 self._record_step("tool", {"tool": "search_kb"}, out)
+            elif role == "web":
+                web_report = run_web(
+                    gate=self.gate,
+                    registry=self.registry,
+                    limits=self.limits,
+                    objective=objective,
+                    run=run,
+                )
+                self._record_step("tool", {"tool": "web_search"}, web_report)
+                if web_report.get("error") == "approval required":
+                    awaiting = True
+                    approval_id = web_report.get("approval_id")
+            elif role == "analyst":
+                analyst_report = run_analyst(
+                    gate=self.gate,
+                    registry=self.registry,
+                    limits=self.limits,
+                    objective=objective,
+                    run=run,
+                )
+                self._record_step("tool", {"tool": "build_comparison_table"}, analyst_report)
             elif role == "critic":
-                # Critic alone: search then verify empty draft signal
                 ret = run_retriever(
                     gate=self.gate,
                     registry=self.registry,
@@ -222,9 +246,15 @@ class AgentRuntime:
                 self._record_step("tool", {"tool": "verify_citations"}, critic_report)
             else:
                 # Orchestrator
-                if tri.complexity == "multi":
+                if tri.complexity in ("multi", "research"):
                     run.state = RunState.AWAITING_SUBAGENTS
                     self._commit()
+                    get_bus().post(
+                        f"run:{run.id}",
+                        f"spawn {tri.roles}",
+                        sender="orchestrator",
+                        urgent=True,
+                    )
                     spawn_tool = self.registry.get("spawn_subagents")
                     assert spawn_tool is not None
                     self.limits.note_step()
@@ -238,14 +268,25 @@ class AgentRuntime:
                         if gr.decision.mode in ("ask", "on_request"):
                             run.state = RunState.AWAITING_APPROVAL
                             awaiting = True
+                            approval_id = gr.approval_id
                         else:
                             self.limits.mark_forced()
                     else:
                         agg = gr.output or {}
-                        hits, retrieval_mode, critic_report = self._harvest_batch(agg)
-                        run.state = RunState.RUNNING
+                        (
+                            hits,
+                            retrieval_mode,
+                            critic_report,
+                            analyst_report,
+                            web_report,
+                        ) = self._harvest_batch(agg)
+                        if web_report and web_report.get("error") == "approval required":
+                            run.state = RunState.AWAITING_APPROVAL
+                            awaiting = True
+                            approval_id = web_report.get("approval_id")
+                        else:
+                            run.state = RunState.RUNNING
                 else:
-                    # simple / verify: direct search via gate
                     if self.limits.would_exceed():
                         self.limits.mark_forced()
                     else:
@@ -262,12 +303,16 @@ class AgentRuntime:
                         if not hits and out.get("error") == "approval required":
                             run.state = RunState.AWAITING_APPROVAL
                             awaiting = True
+                            approval_id = out.get("approval_id")
 
             if awaiting:
                 latency = int((perf_counter() - t0) * 1000)
+                msg = "Требуется одобрение действия (ActionGate ask)."
+                if approval_id:
+                    msg += f" approval_id={approval_id}"
                 return AgentAnswer(
                     run_id=str(run.id),
-                    answer="Требуется одобрение действия (ActionGate ask).",
+                    answer=msg,
                     model="none",
                     citations=[],
                     retrieval_mode=retrieval_mode,
@@ -283,32 +328,56 @@ class AgentRuntime:
             if self.limits.would_exceed():
                 self.limits.mark_forced()
 
+            # Prefer analyst table as scaffolding for synthesis
+            table_md = (analyst_report or {}).get("markdown")
             answer_text, model, tin, tout, cost, llm_ms = self._synthesize(
-                objective, hits, partial=self.limits.usage.partial
+                objective,
+                hits,
+                partial=self.limits.usage.partial,
+                table_md=table_md if isinstance(table_md, str) else None,
+                web_snippets=list((web_report or {}).get("results") or []),
             )
             self.limits.note_llm(tin + tout, cost)
 
-            if tri.complexity == "verify" or critic_report is None and hits:
-                # Optional critic pass when budget allows
-                if not self.limits.would_exceed() and (
-                    tri.complexity == "verify" or "critic" in tri.roles
-                ):
-                    critic_report = run_critic(
-                        gate=self.gate,
-                        registry=self.registry,
-                        limits=self.limits,
-                        objective=objective,
-                        answer=answer_text,
-                        sources=[h.get("text", "") for h in hits],
-                        run=run,
+            if not self.limits.would_exceed() and (
+                tri.complexity in ("verify", "research", "multi") or "critic" in tri.roles
+            ):
+                critic_report = run_critic(
+                    gate=self.gate,
+                    registry=self.registry,
+                    limits=self.limits,
+                    objective=objective,
+                    answer=answer_text,
+                    sources=[h.get("text", "") for h in hits],
+                    run=run,
+                )
+                self._record_step("tool", {"tool": "verify_citations"}, critic_report)
+                if critic_report.get("needs_revision") and not self.limits.would_exceed():
+                    answer_text, model2, tin2, tout2, cost2, llm_ms2 = self._synthesize(
+                        objective + "\n\nИсправь неподтверждённые утверждения.",
+                        hits,
+                        partial=self.limits.usage.partial,
+                        table_md=table_md if isinstance(table_md, str) else None,
+                        revision_note="critic requested revision",
                     )
-                    self._record_step("tool", {"tool": "verify_citations"}, critic_report)
+                    model = model2 or model
+                    tin += tin2
+                    tout += tout2
+                    cost += cost2
+                    llm_ms = llm_ms2 or llm_ms
+                    self.limits.note_llm(tin2 + tout2, cost2)
+                    self._record_step("synthesize", {"revision": True}, {"model": model})
 
             grounding = check_grounding(answer_text, [h.get("text", "") for h in hits])
-            if critic_report and critic_report.get("grounding_ok") is False:
+            if critic_report and (
+                critic_report.get("grounding_ok") is False or critic_report.get("needs_revision")
+            ):
                 grounding_ok = False
             else:
                 grounding_ok = grounding.ok
+
+            if table_md and "Aspect" in table_md and table_md not in answer_text:
+                answer_text = f"{answer_text.rstrip()}\n\n{table_md}"
 
             if self.limits.usage.partial and not answer_text.startswith("[частичный"):
                 answer_text = "[частичный ответ — бюджет исчерпан]\n" + answer_text
@@ -326,6 +395,32 @@ class AgentRuntime:
                 for i, h in enumerate(hits, start=1)
             ]
 
+            distill_info = None
+            if self.settings.distill_enabled and self.registry.get("distill_run"):
+                dtool = self.registry.get("distill_run")
+                assert dtool is not None
+                dres = self.gate.execute(
+                    run=run,
+                    tool=dtool,
+                    args={
+                        "run_id": str(run.id),
+                        "objective": objective,
+                        "answer": answer_text[:2000],
+                        "citations": citations,
+                        "plan": plan,
+                    },
+                )
+                if dres.executed:
+                    distill_info = dres.output
+                    self._record_step("tool", {"tool": "distill_run"}, distill_info)
+
+            get_bus().post(
+                f"run:{run.id}",
+                "completed",
+                sender="orchestrator",
+                meta={"grounding_ok": grounding_ok},
+            )
+
             run.state = RunState.COMPLETED
             run.usage = self.limits.usage.to_dict()
             run.result = {
@@ -333,6 +428,9 @@ class AgentRuntime:
                 "partial": self.limits.usage.partial,
                 "grounding_ok": grounding_ok,
                 "critic": critic_report,
+                "analyst": analyst_report,
+                "web": web_report,
+                "distill": distill_info,
             }
             self._record_step(
                 "synthesize",
@@ -368,44 +466,82 @@ class AgentRuntime:
 
     def _harvest_batch(
         self, agg: dict[str, Any]
-    ) -> tuple[list[dict[str, Any]], str, dict[str, Any] | None]:
+    ) -> tuple[
+        list[dict[str, Any]],
+        str,
+        dict[str, Any] | None,
+        dict[str, Any] | None,
+        dict[str, Any] | None,
+    ]:
         hits: list[dict[str, Any]] = []
         mode = "subagents"
         critic: dict[str, Any] | None = None
+        analyst: dict[str, Any] | None = None
+        web: dict[str, Any] | None = None
         for child in agg.get("children") or []:
             res = child.get("result") or {}
-            if child.get("role") == "retriever":
+            role = child.get("role")
+            if role == "retriever":
                 hits = list(res.get("hits") or hits)
                 mode = str(res.get("retrieval_mode") or mode)
-            elif child.get("role") == "critic":
+            elif role == "critic":
                 critic = res
                 if not hits and res.get("hits"):
                     hits = list(res["hits"])
-        return hits, mode, critic
+            elif role == "analyst":
+                analyst = res
+            elif role == "web":
+                web = res
+        return hits, mode, critic, analyst, web
 
     def _tool_spawn(self, *, roles: list[str], objective: str) -> dict[str, Any]:
         parent = self._active_run
+        # Shared scratch so analyst can see KB/web from earlier children in same batch
+        scratch: dict[str, Any] = {"hits": [], "web_results": []}
 
         def runner(child: ChildRun) -> dict[str, Any]:
-            # Nested lightweight run sharing gate/registry/limits
             if child.role == "retriever":
-                return run_retriever(
+                out = run_retriever(
                     gate=self.gate,
                     registry=self.registry,
                     limits=self.limits,
                     objective=objective,
                     run=parent,
+                )
+                scratch["hits"] = list(out.get("hits") or [])
+                return out
+            if child.role == "web":
+                out = run_web(
+                    gate=self.gate,
+                    registry=self.registry,
+                    limits=self.limits,
+                    objective=objective,
+                    run=parent,
+                )
+                scratch["web_results"] = list(out.get("results") or [])
+                return out
+            if child.role == "analyst":
+                return run_analyst(
+                    gate=self.gate,
+                    registry=self.registry,
+                    limits=self.limits,
+                    objective=objective,
+                    run=parent,
+                    kb_hits=list(scratch.get("hits") or []),
+                    web_results=list(scratch.get("web_results") or []),
                 )
             if child.role == "critic":
-                # Critic child: retrieve + draft + verify
-                ret = run_retriever(
-                    gate=self.gate,
-                    registry=self.registry,
-                    limits=self.limits,
-                    objective=objective,
-                    run=parent,
-                )
-                hits = list(ret.get("hits") or [])
+                hits = list(scratch.get("hits") or [])
+                if not hits:
+                    ret = run_retriever(
+                        gate=self.gate,
+                        registry=self.registry,
+                        limits=self.limits,
+                        objective=objective,
+                        run=parent,
+                    )
+                    hits = list(ret.get("hits") or [])
+                    scratch["hits"] = hits
                 draft = self._draft_from_hits(objective, hits)
                 report = run_critic(
                     gate=self.gate,
@@ -417,7 +553,6 @@ class AgentRuntime:
                     run=parent,
                 )
                 report["hits"] = hits
-                report["retrieval_mode"] = ret.get("retrieval_mode")
                 return report
             return {"error": f"unknown_role:{child.role}"}
 
@@ -449,6 +584,9 @@ class AgentRuntime:
         hits: list[dict[str, Any]],
         *,
         partial: bool,
+        table_md: str | None = None,
+        web_snippets: list[dict[str, Any]] | None = None,
+        revision_note: str | None = None,
     ) -> tuple[str, str, int, int, float, int]:
         contexts = [
             {
@@ -459,7 +597,20 @@ class AgentRuntime:
             }
             for h in hits
         ]
+        for i, w in enumerate(web_snippets or [], start=1):
+            contexts.append(
+                {
+                    "text": w.get("snippet") or w.get("text") or "",
+                    "document_name": w.get("title") or f"web-{i}",
+                    "score": 0.0,
+                    "section_path": w.get("url"),
+                }
+            )
         prompt = build_rag_prompt(objective, contexts)
+        if table_md:
+            prompt += f"\n\nЧерновик таблицы от Analyst:\n{table_md}\nВключи таблицу в ответ."
+        if revision_note:
+            prompt += f"\n\n({revision_note})"
         if partial:
             prompt += "\n\n(Бюджет агента исчерпан — дай краткий частичный ответ.)"
 
@@ -470,8 +621,7 @@ class AgentRuntime:
             try:
                 result = gateway.chat(user_message=prompt, system_prompt=SYSTEM_PROMPT)
             except Exception:
-                # Offline / mock fallback for tests & diploma demos without Ollama
-                text = self._heuristic_answer(objective, hits, partial=partial)
+                text = self._heuristic_answer(objective, hits, partial=partial, table_md=table_md)
                 return text, "heuristic", 0, 0, 0.0, 0
 
         return (
@@ -484,14 +634,25 @@ class AgentRuntime:
         )
 
     @staticmethod
-    def _heuristic_answer(objective: str, hits: list[dict[str, Any]], *, partial: bool) -> str:
-        if not hits:
+    def _heuristic_answer(
+        objective: str,
+        hits: list[dict[str, Any]],
+        *,
+        partial: bool,
+        table_md: str | None = None,
+    ) -> str:
+        if not hits and not table_md:
             msg = "В базе нет релевантного контекста для ответа."
             return f"[частичный ответ — бюджет исчерпан]\n{msg}" if partial else msg
-        top = hits[0]
-        snippet = (top.get("text") or "")[:400]
-        title = top.get("document_name") or "источник"
-        body = f"Согласно [{title}][1]: {snippet}"
+        if hits:
+            top = hits[0]
+            snippet = (top.get("text") or "")[:400]
+            title = top.get("document_name") or "источник"
+            body = f"Согласно [{title}][1]: {snippet}"
+        else:
+            body = f"Сводка по запросу: {objective}"
+        if table_md:
+            body = f"{body}\n\n{table_md}"
         if partial:
             return f"[частичный ответ — бюджет исчерпан]\n{body}"
         return body

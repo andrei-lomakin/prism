@@ -14,6 +14,14 @@
           <option value="agent">агент</option>
         </select>
       </label>
+      <label>space
+        <select id="space">
+          <option value="personal">personal</option>
+          <option value="project">project</option>
+          <option value="shared" selected>shared</option>
+        </select>
+      </label>
+      <label class="muted"><input type="checkbox" id="stream" checked /> stream</label>
       <button type="submit" class="btn">Спросить</button>
       <button type="button" id="btn-search" class="btn btn-ghost">Только поиск</button>
     </div>
@@ -27,7 +35,9 @@
 <script>
   document.getElementById('chat-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    await PrismApp.chat();
+    const stream = document.getElementById('stream')?.checked;
+    if (stream) await PrismApp.chatStream();
+    else await PrismApp.chat();
   });
   document.getElementById('btn-search').addEventListener('click', () => PrismApp.searchOnly());
 </script>

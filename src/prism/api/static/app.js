@@ -1,4 +1,20 @@
 const PrismApp = {
+  _showTrace(traceEl, mode, data) {
+    if (!traceEl || !data.trace_id) return;
+    const q = mode === 'agent'
+      ? `run_id=${encodeURIComponent(data.trace_id)}`
+      : `trace_id=${encodeURIComponent(data.trace_id)}`;
+    traceEl.classList.remove('hidden');
+    traceEl.innerHTML = `trace: <a href="/trace?${q}">${data.trace_id}</a> · mode=${data.retrieval_mode || mode}`;
+  },
+
+  _showCitations(sourcesEl, citations) {
+    sourcesEl.innerHTML = (citations || []).map((c) => `
+      <div class="source">
+        <div class="meta">[${c.n}] ${c.title} · score=${c.score}${c.section_path ? ' · ' + c.section_path : ''}</div>
+      </div>`).join('');
+  },
+
   async chat() {
     const query = document.getElementById('query').value.trim();
     const top_k = Number(document.getElementById('top_k').value || 5);
@@ -22,17 +38,59 @@ const PrismApp = {
       return;
     }
     answerEl.textContent = data.answer;
-    if (traceEl && data.trace_id) {
-      const q = mode === 'agent'
-        ? `run_id=${encodeURIComponent(data.trace_id)}`
-        : `trace_id=${encodeURIComponent(data.trace_id)}`;
-      traceEl.classList.remove('hidden');
-      traceEl.innerHTML = `trace: <a href="/trace?${q}">${data.trace_id}</a> · mode=${data.retrieval_mode || mode}`;
+    this._showTrace(traceEl, mode, data);
+    this._showCitations(sourcesEl, data.citations);
+  },
+
+  async chatStream() {
+    const query = document.getElementById('query').value.trim();
+    const top_k = Number(document.getElementById('top_k').value || 5);
+    const mode = document.getElementById('mode')?.value || 'rag';
+    const answerEl = document.getElementById('answer');
+    const sourcesEl = document.getElementById('sources');
+    const traceEl = document.getElementById('trace-link');
+    answerEl.classList.remove('hidden');
+    answerEl.textContent = '';
+    sourcesEl.innerHTML = '';
+    if (traceEl) { traceEl.classList.add('hidden'); traceEl.innerHTML = ''; }
+    const res = await fetch('/api/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, top_k, mode }),
+    });
+    if (!res.ok || !res.body) {
+      answerEl.textContent = 'stream error';
+      return;
     }
-    sourcesEl.innerHTML = (data.citations || []).map((c) => `
-      <div class="source">
-        <div class="meta">[${c.n}] ${c.title} · score=${c.score}${c.section_path ? ' · ' + c.section_path : ''}</div>
-      </div>`).join('');
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    let event = 'message';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split('\n\n');
+      buf = parts.pop() || '';
+      for (const block of parts) {
+        let dataLine = '';
+        for (const line of block.split('\n')) {
+          if (line.startsWith('event:')) event = line.slice(6).trim();
+          if (line.startsWith('data:')) dataLine += line.slice(5).trim();
+        }
+        if (!dataLine) continue;
+        let data;
+        try { data = JSON.parse(dataLine); } catch { continue; }
+        if (event === 'token') answerEl.textContent += (data.text || '');
+        if (event === 'step') answerEl.textContent += `\n· ${data.kind || 'step'}`;
+        if (event === 'final') {
+          answerEl.textContent = data.answer || answerEl.textContent;
+          this._showTrace(traceEl, mode, data);
+          this._showCitations(sourcesEl, data.citations);
+        }
+        if (event === 'error') answerEl.textContent = data.detail || 'error';
+      }
+    }
   },
 
   async searchOnly() {

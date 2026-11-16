@@ -70,9 +70,9 @@ tests/
 
 ## Current status
 
-**Stages 0–5:** RAG (dense/hybrid/BM25, C1–C7, rewrite, rerank), eval + ablations (`prism eval compare`), agents (Gate, Orchestrator/Retriever/Critic), observability (trace buffer, `/trace`, approvals, optional Phoenix profile). Chat: `mode=rag|agent`.
+**Stages 0–6:** RAG + eval/ablations, full agent stack (Orchestrator/Retriever/Web/Analyst/Critic, Gate, distill), observability, product UI (`/search` stream, `/trace`, `/approvals`, `/eval`). Demo: [`docs/DEMO.md`](docs/DEMO.md).
 
-Next: Stage 6 product demo (Web/Analyst, streaming, full §11 walkthrough).
+Next: Stage 7 — ADR, slides, final held-out eval write-up.
 
 ---
 

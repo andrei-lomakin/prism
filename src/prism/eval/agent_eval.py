@@ -48,11 +48,21 @@ def run_agent_scenarios(path: str | Path) -> dict[str, Any]:
             max_steps=int(sc["max_steps"]) if "max_steps" in sc else 12,
             max_searches=int(sc["max_searches"]) if "max_searches" in sc else 4,
         )
-        rt = AgentRuntime(db=None, llm=_mock_llm, budget=budget, persist=False)
+        rt = AgentRuntime(
+            db=None,
+            llm=_mock_llm,
+            budget=budget,
+            persist=False,
+            # Offline scenarios auto-approve ask tools (web/fetch) when requested
+            approval_fn=(lambda *_a, **_k: True) if sc.get("auto_approve", True) else None,
+        )
         ans = rt.handle(sc["objective"], role=sc.get("role") or "orchestrator")
-        success = ans.state == "completed"
-        if sc.get("expect_partial"):
-            success = success and ans.partial
+        if sc.get("expect_state"):
+            success = ans.state == sc["expect_state"]
+        elif sc.get("expect_partial"):
+            success = ans.state == "completed" and ans.partial
+        else:
+            success = ans.state == "completed"
         if sc.get("expect_complexity"):
             success = success and ans.plan.get("complexity") == sc["expect_complexity"]
         gate_asks = sum(1 for e in ans.audit if e.get("decision") == "ask")

@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Eval · Prism{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>Eval dashboard</h1>
+  <p class="muted">Сравнительная таблица абляций из <code>reports/</code>. Худшие вопросы — из per_question.jsonl.</p>
+  <div class="row">
+    <button type="button" id="btn-refresh" class="btn">Обновить таблицу</button>
+  </div>
+  <div id="table" class="answer" style="overflow:auto"></div>
+  <h2>Худшие вопросы</h2>
+  <div class="row">
+    <label>run_id <input id="run_id" placeholder="20261116T132843Z_ablate_hybrid" /></label>
+    <button type="button" id="btn-worst" class="btn btn-ghost">Показать 2</button>
+  </div>
+  <pre id="worst" class="answer">—</pre>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+  async function loadAblations(refresh=false) {
+    const r = await fetch('/api/eval/ablations' + (refresh ? '?refresh=true' : ''));
+    const data = await r.json();
+    document.getElementById('table').textContent = data.markdown || JSON.stringify(data.rows, null, 2);
+    if (data.rows && data.rows.length) {
+      const best = [...data.rows].filter(x => x['recall@5'] != null).sort((a,b)=>b['recall@5']-a['recall@5'])[0];
+      if (best) document.getElementById('run_id').value = best.run_id;
+    }
+  }
+  document.getElementById('btn-refresh').onclick = () => loadAblations(true);
+  document.getElementById('btn-worst').onclick = async () => {
+    const id = document.getElementById('run_id').value.trim();
+    const r = await fetch('/api/eval/runs/' + encodeURIComponent(id) + '/worst?n=2');
+    const data = await r.json();
+    document.getElementById('worst').textContent = JSON.stringify(data, null, 2);
+  };
+  loadAblations(false);
+</script>
+{% endblock %}

@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import logging
+import re
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import quote_plus
 
+import httpx
+from bs4 import BeautifulSoup
 from sqlalchemy.orm import Session
 
 from prism.agents.memory import MemoryStore
+from prism.agents.memory.distill import distill_run_to_memory
 from prism.agents.policy.rules import apply_overlay
 from prism.agents.tools import ToolRegistry, ToolSpec
 from prism.config import Settings, get_settings
@@ -15,6 +21,8 @@ from prism.db.models import Chunk, Document
 from prism.rag.generate.grounding import check_citations, check_grounding
 from prism.rag.retrieve import retrieve
 from prism.rag.rewrite import rewrite as rewrite_query_fn
+
+logger = logging.getLogger(__name__)
 
 
 class ToolContext:
@@ -172,8 +180,132 @@ def build_default_registry(ctx: ToolContext) -> ToolRegistry:
         return {"accepted": ok, "reason": reason, "tool": tool, "mode": mode}
 
     def web_search(query: str) -> dict[str, Any]:
-        # Intentionally stubbed — policy default is ask; no external call in MVP.
-        return {"error": "web_search_disabled", "query": query}
+        """External search (ask-gated). Offline → deterministic mock hits."""
+        q = (query or "").strip()
+        mock = [
+            {
+                "title": f"Overview: {q[:80]}",
+                "url": f"https://example.com/search?q={quote_plus(q)}",
+                "snippet": f"Mock web snippet about {q}. Replace after approval + network.",
+            },
+            {
+                "title": f"Comparison notes: {q[:60]}",
+                "url": "https://example.com/compare",
+                "snippet": "Side-by-side criteria, trade-offs, latency vs quality.",
+            },
+        ]
+        if getattr(ctx.settings, "web_search_mock", True):
+            return {"query": q, "results": mock, "provider": "mock"}
+        # Lightweight HTML scrape of DuckDuckGo lite (best-effort; fail → mock)
+        try:
+            url = f"https://lite.duckduckgo.com/lite/?q={quote_plus(q)}"
+            with httpx.Client(timeout=12.0, follow_redirects=True) as client:
+                resp = client.get(url, headers={"User-Agent": "PrismResearchBot/0.1"})
+                resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "lxml")
+            results: list[dict[str, Any]] = []
+            for a in soup.select("a.result-link")[:5]:
+                href = a.get("href") or ""
+                title = a.get_text(" ", strip=True)
+                if href and title:
+                    results.append({"title": title, "url": href, "snippet": title})
+            if not results:
+                return {"query": q, "results": mock, "provider": "mock_fallback"}
+            return {"query": q, "results": results, "provider": "duckduckgo_lite"}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("web_search failed: %s", exc)
+            return {"query": q, "results": mock, "provider": "mock_error", "error": str(exc)}
+
+    def fetch_page(url: str) -> dict[str, Any]:
+        if getattr(ctx.settings, "web_search_mock", True) or "example.com" in url:
+            return {
+                "url": url,
+                "title": "Mock page",
+                "text": f"Mock page body for {url}. Useful for offline demos.",
+                "chars": 48,
+            }
+        try:
+            with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+                resp = client.get(url, headers={"User-Agent": "PrismResearchBot/0.1"})
+                resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "lxml")
+            for tag in soup(["script", "style", "noscript"]):
+                tag.decompose()
+            title = (soup.title.get_text(strip=True) if soup.title else url)[:200]
+            text = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))[:4000]
+            return {"url": url, "title": title, "text": text, "chars": len(text)}
+        except Exception as exc:  # noqa: BLE001
+            return {"url": url, "error": str(exc)}
+
+    def build_comparison_table(
+        objective: str,
+        kb_hits: list[dict[str, Any]] | None = None,
+        web_results: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        kb_hits = kb_hits or []
+        web_results = web_results or []
+        rows: list[dict[str, str]] = []
+        for i, h in enumerate(kb_hits[:4], start=1):
+            rows.append(
+                {
+                    "aspect": f"KB[{i}] {h.get('document_name') or 'doc'}",
+                    "evidence": (h.get("text") or "")[:180],
+                    "source": "kb",
+                }
+            )
+        for i, w in enumerate(web_results[:4], start=1):
+            rows.append(
+                {
+                    "aspect": f"Web[{i}] {w.get('title') or 'page'}",
+                    "evidence": (w.get("snippet") or w.get("text") or "")[:180],
+                    "source": "web",
+                }
+            )
+        if not rows:
+            rows = [
+                {
+                    "aspect": "insufficient evidence",
+                    "evidence": f"No rows for: {objective}",
+                    "source": "none",
+                }
+            ]
+        md = "| Aspect | Evidence | Source |\n|---|---|---|\n" + "\n".join(
+            f"| {r['aspect'].replace('|', '/')} | {r['evidence'].replace('|', '/')} | {r['source']} |"
+            for r in rows
+        )
+        return {"objective": objective, "rows": rows, "markdown": md}
+
+    def judge(answer: str, question: str, sources: list[str] | None = None) -> dict[str, Any]:
+        sources = sources or []
+        g = check_grounding(answer, sources)
+        # Soft completeness: answer should mention at least one contentful token from question
+        tokens = [t for t in re.findall(r"[A-Za-zА-Яа-яЁё0-9]{4,}", question.lower())]
+        covered = sum(1 for t in tokens if t in (answer or "").lower())
+        completeness = covered / max(1, len(tokens))
+        ok = g.ok and completeness >= 0.2
+        return {
+            "ok": ok,
+            "grounding_ok": g.ok,
+            "completeness": round(completeness, 3),
+            "unsupported_numbers": g.unsupported_numbers,
+            "needs_revision": not ok,
+        }
+
+    def distill_run(
+        run_id: str,
+        objective: str,
+        answer: str,
+        citations: list[dict[str, Any]] | None = None,
+        plan: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return distill_run_to_memory(
+            ctx.memory,
+            run_id=run_id,
+            objective=objective,
+            answer=answer,
+            citations=citations,
+            plan=plan,
+        )
 
     specs = [
         ToolSpec(
@@ -259,6 +391,40 @@ def build_default_registry(ctx: ToolContext) -> ToolRegistry:
             side_effect="external",
             schema={"query": "str"},
             execute=web_search,
+        ),
+        ToolSpec(
+            code="fetch_page",
+            category="external",
+            side_effect="external",
+            schema={"url": "str"},
+            execute=fetch_page,
+        ),
+        ToolSpec(
+            code="build_comparison_table",
+            category="analysis",
+            side_effect="none",
+            schema={"objective": "str", "kb_hits": "list?", "web_results": "list?"},
+            execute=build_comparison_table,
+        ),
+        ToolSpec(
+            code="judge",
+            category="quality",
+            side_effect="none",
+            schema={"answer": "str", "question": "str", "sources": "list[str]?"},
+            execute=judge,
+        ),
+        ToolSpec(
+            code="distill_run",
+            category="memory",
+            side_effect="write",
+            schema={
+                "run_id": "str",
+                "objective": "str",
+                "answer": "str",
+                "citations": "list?",
+                "plan": "dict?",
+            },
+            execute=distill_run,
         ),
     ]
     for spec in specs:

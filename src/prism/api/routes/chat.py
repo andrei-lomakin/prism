@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Iterator
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from prism.api.schemas import (
@@ -22,6 +26,10 @@ from prism.rag.generate import SYSTEM_PROMPT, build_rag_prompt, check_grounding
 from prism.rag.retrieve import retrieve
 
 router = APIRouter(prefix="/api", tags=["chat"])
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 @router.post("/search", response_model=SearchResponse)
@@ -141,3 +149,95 @@ def api_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespons
         ),
         trace_id=tid,
     )
+
+
+@router.post("/chat/stream")
+def api_chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> StreamingResponse:
+    """SSE stream: plan/steps/token chunks/final. Agent emits step events; RAG chunks answer."""
+    cfg = settings_as_config(db)
+    tid = trace_buffer.start_trace()
+
+    def gen() -> Iterator[str]:
+        yield _sse("start", {"trace_id": tid, "mode": payload.mode})
+        try:
+            if payload.mode == "agent":
+                from prism.agents import AgentRuntime
+
+                if payload.top_k is not None:
+                    cfg.top_k = payload.top_k
+                runtime = AgentRuntime(db, settings=cfg, persist=True)
+                answer = runtime.handle(payload.query, role="orchestrator")
+                yield _sse("plan", answer.plan)
+                for step in answer.steps:
+                    yield _sse("step", step)
+                # chunk answer for UX
+                text = answer.answer or ""
+                chunk_size = 48
+                for i in range(0, len(text), chunk_size):
+                    yield _sse("token", {"text": text[i : i + chunk_size]})
+                yield _sse(
+                    "final",
+                    {
+                        "answer": answer.answer,
+                        "model": answer.model,
+                        "citations": answer.citations,
+                        "retrieval_mode": answer.retrieval_mode,
+                        "grounding_ok": answer.grounding_ok,
+                        "trace_id": str(answer.run_id),
+                        "state": answer.state,
+                        "usage": answer.usage,
+                    },
+                )
+            else:
+                hits, mode = retrieve(db, payload.query, top_k=payload.top_k, settings=cfg)
+                yield _sse(
+                    "retrieval",
+                    {"mode": mode, "n": len(hits), "docs": [h.document_name for h in hits[:5]]},
+                )
+                contexts = [
+                    {
+                        "text": h.text,
+                        "document_name": h.document_name,
+                        "score": h.score,
+                        "section_path": h.section_path,
+                    }
+                    for h in hits
+                ]
+                user_prompt = build_rag_prompt(payload.query, contexts)
+                gateway = LLMGateway(cfg)
+                result = gateway.chat(user_message=user_prompt, system_prompt=SYSTEM_PROMPT)
+                text = result.text or ""
+                for i in range(0, len(text), 48):
+                    yield _sse("token", {"text": text[i : i + 48]})
+                grounding = check_grounding(result.text, [h.text for h in hits])
+                yield _sse(
+                    "final",
+                    {
+                        "answer": result.text,
+                        "model": result.model,
+                        "citations": [
+                            {
+                                "n": i,
+                                "chunk_id": h.chunk_id,
+                                "doc_id": h.document_id,
+                                "title": h.document_name,
+                                "score": round(h.score, 4),
+                            }
+                            for i, h in enumerate(hits, start=1)
+                        ],
+                        "retrieval_mode": mode,
+                        "grounding_ok": grounding.ok,
+                        "trace_id": tid,
+                        "usage": {
+                            "tokens_in": result.tokens_in,
+                            "tokens_out": result.tokens_out,
+                            "cost_usd": result.cost_usd,
+                            "latency_ms": result.latency_ms,
+                        },
+                    },
+                )
+        except Exception as exc:  # noqa: BLE001
+            yield _sse("error", {"detail": str(exc)})
+        yield _sse("done", {})
+
+    return StreamingResponse(gen(), media_type="text/event-stream")

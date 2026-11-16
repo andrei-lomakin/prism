@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
+from prism.agents.runtime.bus import MessageBus, get_bus
 from prism.agents.runtime.limits import LimitTracker, RunBudget, RunUsage
 from prism.agents.runtime.runtime import AgentAnswer, AgentRuntime
 from prism.agents.runtime.subagents import SubagentBatch, SubagentManager
@@ -26,11 +27,13 @@ __all__ = [
     "AgentAnswer",
     "AgentRuntime",
     "LimitTracker",
+    "MessageBus",
     "RunBudget",
     "RunState",
     "RunUsage",
     "SubagentBatch",
     "SubagentManager",
     "TriageResult",
+    "get_bus",
     "triage",
 ]

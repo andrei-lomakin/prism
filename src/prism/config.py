@@ -87,6 +87,10 @@ class Settings(BaseSettings):
     otel_service_name: str = "prism"
     otel_exporter_endpoint: str | None = None  # e.g. http://localhost:4317
 
+    # Stage 6 web tools (mock by default for offline demos)
+    web_search_mock: bool = True
+    distill_enabled: bool = True
+
 
 @lru_cache
 def get_settings() -> Settings:

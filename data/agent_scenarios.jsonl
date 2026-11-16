@@ -28,3 +28,5 @@
 {"id": "a28", "objective": "Что такое Soft supersede в памяти?", "expect_complexity": "simple"}
 {"id": "a29", "objective": "Сравни auto и ask режимы Gate", "expect_complexity": "multi"}
 {"id": "a30", "objective": "Что такое trace_id в ответе чата?", "expect_complexity": "simple"}
+{"id": "a31", "objective": "Сравни dense и hybrid по базе и свежим статьям, сведи в таблицу", "expect_complexity": "research", "auto_approve": true}
+{"id": "a32", "objective": "Сравни C2 и C5 в таблице", "expect_complexity": "multi"}

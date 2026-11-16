@@ -20,12 +20,24 @@ layers:
       tool: verify_citations
       mode: auto
       locked: true
+    - id: system.judge
+      tool: judge
+      mode: auto
+      locked: true
+    - id: system.build_comparison_table
+      tool: build_comparison_table
+      mode: auto
+      locked: true
     - id: system.recall
       tool: recall
       mode: auto
       locked: true
     - id: system.remember
       tool: remember
+      mode: auto
+      locked: false
+    - id: system.distill_run
+      tool: distill_run
       mode: auto
       locked: false
     - id: system.spawn_subagents
@@ -46,6 +58,10 @@ layers:
       locked: false
     - id: system.web_search
       tool: web_search
+      mode: ask
+      locked: false
+    - id: system.fetch_page
+      tool: fetch_page
       mode: ask
       locked: false
     - id: system.propose_rule

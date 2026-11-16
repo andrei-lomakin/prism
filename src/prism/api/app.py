@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from prism.api.routes import chat, documents, runs
+from prism.api.routes import chat, documents, eval_ui, runs
 from prism.api.routes import settings as settings_routes
 from prism.api.settings_store import get_effective_settings
 from prism.config import get_settings
@@ -56,6 +56,7 @@ app.include_router(documents.router)
 app.include_router(chat.router)
 app.include_router(settings_routes.router)
 app.include_router(runs.router)
+app.include_router(eval_ui.router)
 
 
 @app.get("/", response_class=RedirectResponse)
@@ -101,3 +102,8 @@ def page_trace(
 @app.get("/approvals", response_class=HTMLResponse)
 def page_approvals(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "approvals.html", {"active": "approvals"})
+
+
+@app.get("/eval", response_class=HTMLResponse)
+def page_eval(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(request, "eval.html", {"active": "eval"})

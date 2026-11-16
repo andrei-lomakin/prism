@@ -27,8 +27,11 @@ eval-smoke:
 eval-baseline:
 	prism eval run --config configs/eval/baseline.yaml
 
-demo: up golden
-	@echo "Open http://127.0.0.1:8000 — then: make ingest-demo (needs Postgres)"
+demo: up
+	prism init-db
+	prism ingest-demo
+	prism rebuild-bm25
+	@echo "Open http://127.0.0.1:8000 — see docs/DEMO.md"
 
 # Prefer `just check` / `just fix` (see justfile). Makefile kept for parity.
 test:
