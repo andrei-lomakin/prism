@@ -70,9 +70,9 @@ tests/
 
 ## Current status
 
-**Stages 0–4:** dense + hybrid RAG (BM25, RRF/weighted), chunking C1–C7, rewrite R0–R5, optional rerank, eval + golden set, **AgentRuntime** (Orchestrator / Retriever / Critic), ActionGate policies, subagents, memory. Chat: `mode=rag|agent`.
+**Stages 0–5:** RAG (dense/hybrid/BM25, C1–C7, rewrite, rerank), eval + ablations (`prism eval compare`), agents (Gate, Orchestrator/Retriever/Critic), observability (trace buffer, `/trace`, approvals, optional Phoenix profile). Chat: `mode=rag|agent`.
 
-Next: ablation table on test, observability/UI trace (Stages 5–6).
+Next: Stage 6 product demo (Web/Analyst, streaming, full §11 walkthrough).
 
 ---
 

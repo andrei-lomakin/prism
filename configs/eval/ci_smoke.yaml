@@ -1,0 +1,7 @@
+# CI mini-eval: tiny slice, retrieval-only (needs Postgres service)
+name: ci_smoke
+dataset: data/golden/dev.jsonl
+config: configs/rag/baseline.yaml
+max_questions: 10
+retrieval_only: true
+generation: false

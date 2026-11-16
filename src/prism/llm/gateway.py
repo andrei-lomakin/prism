@@ -1,12 +1,12 @@
-"""LLMGateway: single entry for all model calls.
-
-Stage 0: Ollama + optional OpenAI-compatible. Later: PII redaction, cache,
-fallback chain, token/cost accounting.
-"""
+"""LLMGateway: Ollama + OpenAI-compatible with PII redact, cache, cost (S7)."""
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import re
+import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
@@ -14,8 +14,20 @@ from typing import Any
 import httpx
 
 from prism.config import Settings, get_settings
+from prism.observability import span
 
 logger = logging.getLogger(__name__)
+
+_EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+_PHONE = re.compile(r"\b(?:\+?\d[\d\- ()]{8,}\d)\b")
+_CARD = re.compile(r"\b(?:\d[ -]*?){13,19}\b")
+
+
+def redact_pii(text: str) -> str:
+    text = _EMAIL.sub("[EMAIL]", text)
+    text = _PHONE.sub("[PHONE]", text)
+    text = _CARD.sub("[CARD]", text)
+    return text
 
 
 @dataclass
@@ -27,11 +39,41 @@ class LLMResult:
     cost_usd: float = 0.0
     latency_ms: int = 0
     provider: str = "ollama"
+    cached: bool = False
+
+
+class _LRUCache:
+    def __init__(self, maxsize: int = 256) -> None:
+        self.maxsize = maxsize
+        self._data: OrderedDict[str, LLMResult] = OrderedDict()
+
+    def get(self, key: str) -> LLMResult | None:
+        if key not in self._data:
+            return None
+        self._data.move_to_end(key)
+        hit = self._data[key]
+        return LLMResult(
+            text=hit.text,
+            model=hit.model,
+            tokens_in=hit.tokens_in,
+            tokens_out=hit.tokens_out,
+            cost_usd=0.0,
+            latency_ms=0,
+            provider=hit.provider,
+            cached=True,
+        )
+
+    def put(self, key: str, value: LLMResult) -> None:
+        self._data[key] = value
+        self._data.move_to_end(key)
+        while len(self._data) > self.maxsize:
+            self._data.popitem(last=False)
 
 
 class LLMGateway:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
+        self._cache = _LRUCache()
 
     def chat(
         self,
@@ -41,22 +83,58 @@ class LLMGateway:
         model: str | None = None,
         temperature: float = 0.2,
     ) -> LLMResult:
-        provider = self.settings.llm_provider
-        if provider == "ollama":
-            return self._ollama_chat(
-                user_message=user_message,
-                system_prompt=system_prompt,
-                model=model or self.settings.llm_model,
-                temperature=temperature,
-            )
-        if provider == "openai_compatible":
-            return self._openai_chat(
-                user_message=user_message,
-                system_prompt=system_prompt,
-                model=model or self.settings.openai_model or self.settings.llm_model,
-                temperature=temperature,
-            )
-        raise ValueError(f"Unknown llm_provider: {provider}")
+        cfg = self.settings
+        user = redact_pii(user_message) if cfg.llm_pii_redact else user_message
+        system = redact_pii(system_prompt) if cfg.llm_pii_redact else system_prompt
+        model_name = model or (
+            cfg.openai_model or cfg.llm_model
+            if cfg.llm_provider == "openai_compatible"
+            else cfg.llm_model
+        )
+        cache_key = None
+        if cfg.llm_cache_enabled:
+            cache_key = hashlib.sha256(
+                f"{cfg.llm_provider}|{model_name}|{temperature}|{system}|{user}".encode()
+            ).hexdigest()
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                return cached
+
+        with span(
+            "llm.chat",
+            attributes={
+                "provider": cfg.llm_provider,
+                "model": model_name,
+                "temperature": temperature,
+            },
+        ):
+            if cfg.llm_provider == "ollama":
+                result = self._ollama_chat(
+                    user_message=user,
+                    system_prompt=system,
+                    model=model_name,
+                    temperature=temperature,
+                )
+            elif cfg.llm_provider == "openai_compatible":
+                result = self._openai_chat(
+                    user_message=user,
+                    system_prompt=system,
+                    model=model_name,
+                    temperature=temperature,
+                )
+            else:
+                raise ValueError(f"Unknown llm_provider: {cfg.llm_provider}")
+
+        result.cost_usd = self._cost(result.tokens_in, result.tokens_out)
+        if cache_key is not None:
+            self._cache.put(cache_key, result)
+        return result
+
+    def _cost(self, tokens_in: int, tokens_out: int) -> float:
+        cfg = self.settings
+        return (tokens_in / 1_000_000.0) * cfg.llm_input_usd_per_1m + (
+            tokens_out / 1_000_000.0
+        ) * cfg.llm_output_usd_per_1m
 
     def list_models(self) -> list[dict[str, Any]]:
         if self.settings.llm_provider != "ollama":
@@ -81,8 +159,6 @@ class LLMGateway:
         model: str,
         temperature: float,
     ) -> LLMResult:
-        import time
-
         url = f"{self.settings.ollama_base_url.rstrip('/')}/api/chat"
         body = {
             "model": model,
@@ -125,8 +201,6 @@ class LLMGateway:
         model: str,
         temperature: float,
     ) -> LLMResult:
-        import time
-
         base = (self.settings.openai_api_base or "").rstrip("/")
         if not base or not self.settings.openai_api_key:
             raise RuntimeError("OPENAI_API_BASE and OPENAI_API_KEY required")

@@ -1,0 +1,30 @@
+{"id": "a01", "objective": "Что такое RRF?", "expect_complexity": "simple"}
+{"id": "a02", "objective": "Что такое BM25 и pgvector?", "expect_complexity": "simple"}
+{"id": "a03", "objective": "Сравни dense и hybrid retrieval", "expect_complexity": "multi"}
+{"id": "a04", "objective": "Сравни подходы C2 и C5 по section_path", "expect_complexity": "multi"}
+{"id": "a05", "objective": "Проверь цитаты: что такое ContextPacker?", "expect_complexity": "verify"}
+{"id": "a06", "objective": "Что такое nDCG?", "expect_complexity": "simple"}
+{"id": "a07", "objective": "Сравни lexical и dense поиск по метрикам", "expect_complexity": "multi"}
+{"id": "a08", "objective": "Как работает ActionGate?", "expect_complexity": "simple"}
+{"id": "a09", "objective": "Что такое parent-child chunking?", "expect_complexity": "simple"}
+{"id": "a10", "objective": "Сравни R0 и R2 rewriting", "expect_complexity": "multi"}
+{"id": "a11", "objective": "Что такое faithfulness?", "expect_complexity": "simple"}
+{"id": "a12", "objective": "Сравни Orchestrator и Critic роли", "expect_complexity": "multi"}
+{"id": "a13", "objective": "Проверь: что такое HyDE?", "expect_complexity": "verify"}
+{"id": "a14", "objective": "Что такое MRR?", "expect_complexity": "simple"}
+{"id": "a15", "objective": "Сравни RRF и weighted fusion", "expect_complexity": "multi"}
+{"id": "a16", "objective": "Что такое space weights?", "expect_complexity": "simple"}
+{"id": "a17", "objective": "Сравни personal и shared пространства", "expect_complexity": "multi"}
+{"id": "a18", "objective": "Что такое Forced synthesis?", "expect_complexity": "simple", "max_steps": 0, "max_searches": 0, "expect_partial": true}
+{"id": "a19", "objective": "Как устроен golden dataset?", "expect_complexity": "simple"}
+{"id": "a20", "objective": "Сравни Recall@5 и Hit@5", "expect_complexity": "multi"}
+{"id": "a21", "objective": "Что такое cross-encoder rerank?", "expect_complexity": "simple"}
+{"id": "a22", "objective": "Сравни C4 recursive и C6 semantic", "expect_complexity": "multi"}
+{"id": "a23", "objective": "Проверь grounding check", "expect_complexity": "verify"}
+{"id": "a24", "objective": "Что такое doc_key?", "expect_complexity": "simple"}
+{"id": "a25", "objective": "Сравни qwen3 и heuristic fallback", "expect_complexity": "multi"}
+{"id": "a26", "objective": "Что такое RunBudget?", "expect_complexity": "simple"}
+{"id": "a27", "objective": "Сравни spawn_subagents и одиночный search_kb", "expect_complexity": "multi"}
+{"id": "a28", "objective": "Что такое Soft supersede в памяти?", "expect_complexity": "simple"}
+{"id": "a29", "objective": "Сравни auto и ask режимы Gate", "expect_complexity": "multi"}
+{"id": "a30", "objective": "Что такое trace_id в ответе чата?", "expect_complexity": "simple"}

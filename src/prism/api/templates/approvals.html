@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Одобрения · Prism{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>Очередь одобрений</h1>
+  <p class="muted">ActionGate ask/on_request — TTL из настроек (default 300s).</p>
+  <button type="button" id="btn-refresh" class="btn">Обновить</button>
+  <div id="list" class="stack" style="margin-top:1rem"></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+  async function loadApprovals() {
+    const box = document.getElementById('list');
+    box.innerHTML = '…';
+    const r = await fetch('/api/approvals');
+    const data = await r.json();
+    if (!data.items.length) {
+      box.innerHTML = '<p class="muted">Пусто — нет pending действий.</p>';
+      return;
+    }
+    box.innerHTML = '';
+    for (const a of data.items) {
+      const el = document.createElement('div');
+      el.className = 'answer';
+      el.innerHTML = `<div><b>${a.id}</b> · ${a.tool} · run=${a.run_id ?? '—'}</div>
+        <pre style="white-space:pre-wrap">${JSON.stringify(a.args, null, 2)}</pre>
+        <div class="row">
+          <button class="btn" data-act="ok">Одобрить</button>
+          <button class="btn btn-ghost" data-act="no">Отклонить</button>
+        </div>`;
+      el.querySelector('[data-act=ok]').onclick = async () => {
+        await fetch('/api/approvals/' + a.id + '/approve', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+        loadApprovals();
+      };
+      el.querySelector('[data-act=no]').onclick = async () => {
+        await fetch('/api/approvals/' + a.id + '/deny', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+        loadApprovals();
+      };
+      box.appendChild(el);
+    }
+  }
+  document.getElementById('btn-refresh').onclick = loadApprovals;
+  loadApprovals();
+</script>
+{% endblock %}

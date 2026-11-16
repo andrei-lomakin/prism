@@ -67,6 +67,26 @@ class Settings(BaseSettings):
     pack_max_per_doc: int = 3
     pack_min_score: float = 0.0
 
+    # S1 space hierarchy weights (personal > project > shared)
+    space_weight_personal: float = Field(default=1.0, ge=0.0, le=2.0)
+    space_weight_project: float = Field(default=0.85, ge=0.0, le=2.0)
+    space_weight_shared: float = Field(default=0.72, ge=0.0, le=2.0)
+    space_weights_enabled: bool = True
+
+    # LLMGateway extras (S7)
+    llm_cache_enabled: bool = True
+    llm_pii_redact: bool = True
+    llm_input_usd_per_1m: float = 0.0  # local Ollama default = free
+    llm_output_usd_per_1m: float = 0.0
+
+    # ActionGate approval TTL (seconds); 0 = no expiry
+    approval_ttl_seconds: int = Field(default=300, ge=0, le=86400)
+
+    # Observability (Stage 5)
+    otel_enabled: bool = False
+    otel_service_name: str = "prism"
+    otel_exporter_endpoint: str | None = None  # e.g. http://localhost:4317
+
 
 @lru_cache
 def get_settings() -> Settings:

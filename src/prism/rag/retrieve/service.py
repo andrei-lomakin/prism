@@ -10,11 +10,13 @@ from sqlalchemy.orm import Session
 
 from prism.config import Settings, get_settings
 from prism.db.models import Chunk, Document
+from prism.observability import span
 from prism.rag.embeddings import get_embedder
 from prism.rag.index.bm25_store import BM25Store
 from prism.rag.rerank import rerank as cross_rerank
 from prism.rag.retrieve.fusion import rrf_fuse, weighted_fuse
 from prism.rag.retrieve.packer import pack_context
+from prism.rag.retrieve.spaces import apply_space_weights, space_weights_from_settings
 from prism.rag.retrieve.types import RetrievedChunk
 from prism.rag.rewrite import rewrite as rewrite_query
 
@@ -34,6 +36,28 @@ def retrieve(
     k = top_k or cfg.top_k
     mode = cfg.retrieval_mode
     trace_parts = [mode]
+
+    with span(
+        "rag.retrieve",
+        attributes={"mode": mode, "top_k": k, "rewrite": cfg.rewrite_strategy},
+    ):
+        return _retrieve_inner(
+            db, query, top_k=k, settings=cfg, history=history, trace_parts=trace_parts
+        )
+
+
+def _retrieve_inner(
+    db: Session,
+    query: str,
+    *,
+    top_k: int,
+    settings: Settings,
+    history: list[dict] | None,
+    trace_parts: list[str],
+) -> tuple[list[RetrievedChunk], str]:
+    cfg = settings
+    k = top_k
+    mode = cfg.retrieval_mode
 
     rw = rewrite_query(query, cfg.rewrite_strategy, history=history, settings=cfg)
     semantic_q = rw["semantic_query"]
@@ -100,13 +124,21 @@ def retrieve(
     # C7: expand child → parent text for generation context when present
     hits = [_maybe_expand_parent(h) for h in hits]
 
-    packed = pack_context(
-        hits,
-        max_chunks=cfg.pack_max_chunks,
-        max_tokens=cfg.pack_max_tokens,
-        max_per_doc=cfg.pack_max_per_doc,
-        min_score=cfg.pack_min_score,
-    )
+    if cfg.space_weights_enabled:
+        hits = apply_space_weights(hits, space_weights_from_settings(cfg))
+        trace_parts.append("space_weights")
+
+    with span(
+        "rag.pack",
+        attributes={"max_chunks": cfg.pack_max_chunks, "candidate_n": len(hits)},
+    ):
+        packed = pack_context(
+            hits,
+            max_chunks=cfg.pack_max_chunks,
+            max_tokens=cfg.pack_max_tokens,
+            max_per_doc=cfg.pack_max_per_doc,
+            min_score=cfg.pack_min_score,
+        )
     return packed[:k], "+".join(trace_parts)
 
 

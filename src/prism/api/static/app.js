@@ -2,15 +2,19 @@ const PrismApp = {
   async chat() {
     const query = document.getElementById('query').value.trim();
     const top_k = Number(document.getElementById('top_k').value || 5);
+    const modeEl = document.getElementById('mode');
+    const mode = modeEl ? modeEl.value : 'rag';
     const answerEl = document.getElementById('answer');
     const sourcesEl = document.getElementById('sources');
+    const traceEl = document.getElementById('trace-link');
     answerEl.classList.remove('hidden');
-    answerEl.textContent = 'Генерация…';
+    answerEl.textContent = mode === 'agent' ? 'Агент…' : 'Генерация…';
     sourcesEl.innerHTML = '';
+    if (traceEl) { traceEl.classList.add('hidden'); traceEl.innerHTML = ''; }
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, top_k, mode: 'rag' }),
+      body: JSON.stringify({ query, top_k, mode }),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -18,6 +22,13 @@ const PrismApp = {
       return;
     }
     answerEl.textContent = data.answer;
+    if (traceEl && data.trace_id) {
+      const q = mode === 'agent'
+        ? `run_id=${encodeURIComponent(data.trace_id)}`
+        : `trace_id=${encodeURIComponent(data.trace_id)}`;
+      traceEl.classList.remove('hidden');
+      traceEl.innerHTML = `trace: <a href="/trace?${q}">${data.trace_id}</a> · mode=${data.retrieval_mode || mode}`;
+    }
     sourcesEl.innerHTML = (data.citations || []).map((c) => `
       <div class="source">
         <div class="meta">[${c.n}] ${c.title} · score=${c.score}${c.section_path ? ' · ' + c.section_path : ''}</div>

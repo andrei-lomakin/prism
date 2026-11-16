@@ -12,10 +12,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from prism.api.routes import chat, documents
+from prism.api.routes import chat, documents, runs
 from prism.api.routes import settings as settings_routes
 from prism.api.settings_store import get_effective_settings
+from prism.config import get_settings
 from prism.db.session import get_db, init_db
+from prism.observability import setup_tracing
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,6 +30,10 @@ APP_DIR = Path(__file__).resolve().parent
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    cfg = get_settings()
+    setup_tracing(
+        cfg.otel_service_name, enabled=cfg.otel_enabled, endpoint=cfg.otel_exporter_endpoint
+    )
     try:
         init_db()
         logger.info("Database ready")
@@ -49,6 +55,7 @@ templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
 app.include_router(documents.router)
 app.include_router(chat.router)
 app.include_router(settings_routes.router)
+app.include_router(runs.router)
 
 
 @app.get("/", response_class=RedirectResponse)
@@ -78,3 +85,19 @@ def page_settings(request: Request, db: Session = Depends(get_db)) -> HTMLRespon
         "settings.html",
         {"active": "settings", "settings": get_effective_settings(db)},
     )
+
+
+@app.get("/trace", response_class=HTMLResponse)
+def page_trace(
+    request: Request, run_id: str | None = None, trace_id: str | None = None
+) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "trace.html",
+        {"active": "trace", "run_id": run_id or "", "trace_id": trace_id or ""},
+    )
+
+
+@app.get("/approvals", response_class=HTMLResponse)
+def page_approvals(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(request, "approvals.html", {"active": "approvals"})

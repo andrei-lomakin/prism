@@ -1,6 +1,5 @@
-"""OpenTelemetry setup + cost tables (stage 5)."""
+"""Observability: OTel spans + in-process trace buffer (Stage 5)."""
 
+from prism.observability.tracing import get_tracer, setup_tracing, span, trace_buffer
 
-def setup_tracing(service_name: str = "prism") -> None:
-    # No-op in stage 0; wired in stage 5.
-    return None
+__all__ = ["get_tracer", "setup_tracing", "span", "trace_buffer"]

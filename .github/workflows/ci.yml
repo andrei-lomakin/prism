@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, develop]
   pull_request:
 
 jobs:
@@ -18,13 +18,31 @@ jobs:
       - name: Install
         run: pip install -e ".[dev]"
 
-      - name: Ruff
+      - name: Ruff format
+        run: ruff format --check src tests
+
+      - name: Ruff lint
         run: ruff check src tests
 
-      - name: Pytest (unit)
+      - name: Pytest
         run: pytest -q
+
+      - name: Agent scenarios (mock LLM)
+        run: python -m prism.cli agent eval --scenarios data/agent_scenarios.jsonl
+
+      - name: Eval compare (from committed reports)
+        run: python -m prism.cli eval compare
 
       - name: Gitleaks
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Optional retrieval smoke — needs indexed DB; skipped until demo fixtures in CI image.
+  # Enable when compose services + ingest-demo are wired into the job.
+  # retrieval-smoke:
+  #   runs-on: ubuntu-latest
+  #   services:
+  #     postgres:
+  #       image: pgvector/pgvector:pg16
+  #       ...

@@ -36,6 +36,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Skip LLM judge; use lexical heuristics only",
     )
+    eval_sub.add_parser(
+        "compare",
+        help="Build ablation comparison table from reports/*/metrics.json",
+    )
+    agent_p = sub.add_parser("agent", help="Agent runtime commands")
+    agent_sub = agent_p.add_subparsers(dest="agent_cmd")
+    agent_eval = agent_sub.add_parser("eval", help="Run agent scenarios (mock LLM)")
+    agent_eval.add_argument(
+        "--scenarios",
+        default="data/agent_scenarios.jsonl",
+        help="Path to agent scenarios jsonl",
+    )
 
     args = parser.parse_args(argv)
 
@@ -83,6 +95,20 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps(summary, ensure_ascii=False, indent=2))
         return 0
+
+    if args.cmd == "eval" and args.eval_cmd == "compare":
+        from prism.eval.compare import write_comparison
+
+        summary = write_comparison()
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.cmd == "agent" and args.agent_cmd == "eval":
+        from prism.eval.agent_eval import run_agent_scenarios
+
+        summary = run_agent_scenarios(args.scenarios)
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return 0 if summary.get("failed", 0) == 0 else 1
 
     parser.print_help()
     return 0

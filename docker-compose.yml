@@ -81,6 +81,18 @@ services:
     volumes:
       - prism_ollama:/root/.ollama
 
+  # Optional tracing UI: docker compose --profile obs up
+  # Point OTEL_EXPORTER_ENDPOINT=http://phoenix:4317 and OTEL_ENABLED=true on api/worker.
+  phoenix:
+    profiles: ["obs"]
+    image: arizephoenix/phoenix:latest
+    ports:
+      - "6006:6006"
+      - "4317:4317"
+    environment:
+      PHOENIX_PORT: "6006"
+      PHOENIX_GRPC_PORT: "4317"
+
 volumes:
   prism_pg:
   prism_ollama:

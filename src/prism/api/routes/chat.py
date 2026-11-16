@@ -17,6 +17,7 @@ from prism.api.schemas import (
 from prism.api.settings_store import settings_as_config
 from prism.db.session import get_db
 from prism.llm import LLMGateway
+from prism.observability import span, trace_buffer
 from prism.rag.generate import SYSTEM_PROMPT, build_rag_prompt, check_grounding
 from prism.rag.retrieve import retrieve
 
@@ -26,8 +27,10 @@ router = APIRouter(prefix="/api", tags=["chat"])
 @router.post("/search", response_model=SearchResponse)
 def api_search(payload: SearchRequest, db: Session = Depends(get_db)) -> SearchResponse:
     cfg = settings_as_config(db)
+    tid = trace_buffer.start_trace()
     try:
-        hits, mode = retrieve(db, payload.query, top_k=payload.top_k, settings=cfg)
+        with span("api.search", attributes={"trace_id": tid}):
+            hits, mode = retrieve(db, payload.query, top_k=payload.top_k, settings=cfg)
     except Exception as exc:
         raise HTTPException(503, f"Search failed: {exc}") from exc
     return SearchResponse(
@@ -52,14 +55,17 @@ def api_search(payload: SearchRequest, db: Session = Depends(get_db)) -> SearchR
 def api_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     cfg = settings_as_config(db)
 
+    tid = trace_buffer.start_trace()
+
     if payload.mode == "agent":
         from prism.agents import AgentRuntime
 
         if payload.top_k is not None:
             cfg.top_k = payload.top_k
         try:
-            runtime = AgentRuntime(db, settings=cfg, persist=True)
-            answer = runtime.handle(payload.query, role="orchestrator")
+            with span("api.chat.agent", attributes={"trace_id": tid}):
+                runtime = AgentRuntime(db, settings=cfg, persist=True)
+                answer = runtime.handle(payload.query, role="orchestrator")
         except Exception as exc:
             raise HTTPException(503, f"Agent run failed: {exc}") from exc
         return ChatResponse(
@@ -86,29 +92,26 @@ def api_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespons
                 cost_usd=answer.cost_usd,
                 latency_ms=answer.latency_ms,
             ),
-            trace_id=answer.run_id,
+            trace_id=str(answer.run_id),
         )
 
     try:
-        hits, mode = retrieve(db, payload.query, top_k=payload.top_k, settings=cfg)
+        with span("api.chat.rag", attributes={"trace_id": tid}):
+            hits, mode = retrieve(db, payload.query, top_k=payload.top_k, settings=cfg)
+            contexts = [
+                {
+                    "text": h.text,
+                    "document_name": h.document_name,
+                    "score": h.score,
+                    "section_path": h.section_path,
+                }
+                for h in hits
+            ]
+            user_prompt = build_rag_prompt(payload.query, contexts)
+            gateway = LLMGateway(cfg)
+            result = gateway.chat(user_message=user_prompt, system_prompt=SYSTEM_PROMPT)
     except Exception as exc:
-        raise HTTPException(503, f"Retrieval failed: {exc}") from exc
-
-    contexts = [
-        {
-            "text": h.text,
-            "document_name": h.document_name,
-            "score": h.score,
-            "section_path": h.section_path,
-        }
-        for h in hits
-    ]
-    user_prompt = build_rag_prompt(payload.query, contexts)
-    gateway = LLMGateway(cfg)
-    try:
-        result = gateway.chat(user_message=user_prompt, system_prompt=SYSTEM_PROMPT)
-    except Exception as exc:
-        raise HTTPException(503, f"LLM failed ({cfg.llm_model}): {exc}") from exc
+        raise HTTPException(503, f"RAG chat failed: {exc}") from exc
 
     grounding = check_grounding(result.text, [h.text for h in hits])
     citations = [
@@ -136,4 +139,5 @@ def api_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespons
             cost_usd=result.cost_usd,
             latency_ms=result.latency_ms,
         ),
+        trace_id=tid,
     )

@@ -1,0 +1,22 @@
+name: lexical
+chunking:
+  strategy: C2
+  size: 256
+  overlap: 32
+embedding:
+  model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+retrieval:
+  mode: lexical
+  top_k: 10
+rewrite:
+  strategy: R0
+rerank:
+  enabled: false
+generation:
+  provider: ollama
+  model: qwen3:4b
+packer:
+  max_chunks: 8
+  max_tokens: 2048
+  max_per_doc: 3
+  min_score: 0.0

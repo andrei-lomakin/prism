@@ -6,9 +6,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from prism.agents.policy.approvals import ApprovalStore, get_approval_store
 from prism.agents.policy.audit import AuditLog
 from prism.agents.policy.rules import Mode, PolicyBundle, load_policy
 from prism.agents.tools import ToolSpec
+from prism.observability import span
 
 DecisionMode = Mode
 
@@ -26,6 +28,7 @@ class GateResult:
     executed: bool
     output: Any = None
     error: str | None = None
+    approval_id: str | None = None
 
 
 ApprovalFn = Callable[[GateDecision, ToolSpec, dict[str, Any]], bool]
@@ -40,10 +43,12 @@ class ActionGate:
         *,
         audit: AuditLog | None = None,
         approval_fn: ApprovalFn | None = None,
+        approvals: ApprovalStore | None = None,
     ) -> None:
         self.bundle = bundle or load_policy()
         self.audit = audit or AuditLog()
         self.approval_fn = approval_fn
+        self.approvals = approvals if approvals is not None else get_approval_store()
 
     def evaluate(self, run: Any, tool: Any, args: dict) -> GateDecision:
         code = getattr(tool, "code", None) or getattr(tool, "__name__", None) or "unknown"
@@ -67,6 +72,20 @@ class ActionGate:
         run_id = getattr(run, "id", None) if run is not None else None
         decision = self.evaluate(run, tool, args)
 
+        with span(
+            "agent.gate",
+            attributes={"tool": tool.code, "mode": decision.mode, "rule_id": decision.rule_id},
+        ):
+            return self._execute_inner(run_id=run_id, tool=tool, args=args, decision=decision)
+
+    def _execute_inner(
+        self,
+        *,
+        run_id: str | int | None,
+        tool: ToolSpec,
+        args: dict[str, Any],
+        decision: GateDecision,
+    ) -> GateResult:
         if decision.mode == "handoff":
             self.audit.record(
                 run_id=run_id,
@@ -79,10 +98,16 @@ class ActionGate:
             return GateResult(decision=decision, executed=False, error="handoff required")
 
         if decision.mode in ("ask", "on_request"):
-            approved = False
-            if self.approval_fn is not None:
+            approved = self.approvals.is_approved(run_id=run_id, tool=tool.code, args=args)
+            if not approved and self.approval_fn is not None:
                 approved = bool(self.approval_fn(decision, tool, args))
             if not approved:
+                rec = self.approvals.request(
+                    run_id=run_id,
+                    tool=tool.code,
+                    args=args,
+                    rule_id=decision.rule_id,
+                )
                 self.audit.record(
                     run_id=run_id,
                     tool=tool.code,
@@ -91,12 +116,16 @@ class ActionGate:
                     decision="ask",
                     args=args,
                 )
-                return GateResult(decision=decision, executed=False, error="approval required")
+                return GateResult(
+                    decision=decision,
+                    executed=False,
+                    error="approval required",
+                    approval_id=rec.id,
+                )
 
         try:
             output = tool.execute(**args) if args else tool.execute()
         except TypeError:
-            # Tools that take a single dict payload
             output = tool.execute(args)
         except Exception as exc:  # noqa: BLE001 — audited
             self.audit.record(

@@ -3,16 +3,23 @@
 {% block content %}
 <section class="panel">
   <h1>Вопрос к базе</h1>
-  <p class="muted">Быстрый RAG: retrieve → generate с цитатами [n].</p>
+  <p class="muted">RAG или агентный режим (Orchestrator → tools через ActionGate).</p>
   <form id="chat-form" class="stack">
     <textarea id="query" rows="3" placeholder="Задайте вопрос…" required></textarea>
     <div class="row">
       <label>top_k <input type="number" id="top_k" value="{{ default_top_k }}" min="1" max="20" /></label>
+      <label>режим
+        <select id="mode">
+          <option value="rag">быстрый RAG</option>
+          <option value="agent">агент</option>
+        </select>
+      </label>
       <button type="submit" class="btn">Спросить</button>
       <button type="button" id="btn-search" class="btn btn-ghost">Только поиск</button>
     </div>
   </form>
   <div id="answer" class="answer hidden"></div>
+  <div id="trace-link" class="muted hidden"></div>
   <div id="sources" class="sources"></div>
 </section>
 {% endblock %}

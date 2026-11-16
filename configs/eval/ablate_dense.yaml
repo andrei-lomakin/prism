@@ -1,0 +1,6 @@
+name: ablate_dense
+dataset: data/golden/dev.jsonl
+config: configs/rag/dense.yaml
+max_questions: 60
+retrieval_only: true
+generation: false

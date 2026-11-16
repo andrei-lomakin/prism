@@ -80,8 +80,21 @@ eval-smoke:
 eval-hybrid:
     {{ python }} -m prism.cli eval run --config configs/eval/ablate_hybrid.yaml --skip-generation
 
+eval-compare:
+    {{ python }} -m prism.cli eval compare
+
+agent-eval:
+    {{ python }} -m prism.cli agent eval
+
+# One-shot local demo bootstrap (compose must be running)
+demo: init-db ingest-demo rebuild-bm25
+    @echo Open http://127.0.0.1:8000
+
 up:
     docker compose up -d --build
+
+up-obs:
+    docker compose --profile obs up -d --build
 
 down:
     docker compose down

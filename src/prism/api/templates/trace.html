@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Трасса · Prism{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>Трасса рана</h1>
+  <p class="muted">Шаги AgentRun из БД и/или in-process OTel buffer spans.</p>
+  <form id="trace-form" class="row stack">
+    <label>run_id <input id="run_id" value="{{ run_id }}" placeholder="42" /></label>
+    <label>trace_id <input id="trace_id" value="{{ trace_id }}" placeholder="hex" /></label>
+    <button type="submit" class="btn">Загрузить</button>
+  </form>
+  <pre id="trace-out" class="answer">Укажите run_id или trace_id.</pre>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+  document.getElementById('trace-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const runId = document.getElementById('run_id').value.trim();
+    const traceId = document.getElementById('trace_id').value.trim();
+    const out = document.getElementById('trace-out');
+    out.textContent = '…';
+    try {
+      let data = {};
+      if (runId) {
+        const r = await fetch('/api/runs/' + encodeURIComponent(runId));
+        if (!r.ok) throw new Error(await r.text());
+        data.run = await r.json();
+      }
+      if (traceId) {
+        const t = await fetch('/api/traces/' + encodeURIComponent(traceId));
+        if (!t.ok) throw new Error(await t.text());
+        data.trace = await t.json();
+      } else if (data.run) {
+        const t = await fetch('/api/traces/' + encodeURIComponent(String(data.run.id)));
+        if (t.ok) data.trace = await t.json();
+      }
+      out.textContent = JSON.stringify(data, null, 2);
+    } catch (err) {
+      out.textContent = String(err);
+    }
+  });
+</script>
+{% endblock %}

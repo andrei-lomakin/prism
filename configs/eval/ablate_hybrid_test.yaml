@@ -1,0 +1,7 @@
+# Held-out retrieval ablation — do NOT tune on this
+name: ablate_hybrid_test
+dataset: data/golden/test.jsonl
+config: configs/rag/hybrid_rrf.yaml
+max_questions: null
+retrieval_only: true
+generation: false
