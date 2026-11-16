@@ -1,0 +1,23 @@
+# Baseline RAG config (stage 0 / stage 2 eval)
+name: baseline
+chunking:
+  strategy: C2
+  size: 256
+  overlap: 32
+embedding:
+  model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+retrieval:
+  mode: dense
+  top_k: 5
+rerank:
+  enabled: false
+rewrite:
+  strategy: R0
+generation:
+  provider: ollama
+  model: qwen2.5:latest
+packer:
+  max_chunks: 8
+  max_tokens: 2048
+  max_per_doc: 3
+  min_score: 0.0

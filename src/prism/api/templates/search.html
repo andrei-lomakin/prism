@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Поиск · Prism{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>Вопрос к базе</h1>
+  <p class="muted">Быстрый RAG: retrieve → generate с цитатами [n].</p>
+  <form id="chat-form" class="stack">
+    <textarea id="query" rows="3" placeholder="Задайте вопрос…" required></textarea>
+    <div class="row">
+      <label>top_k <input type="number" id="top_k" value="{{ default_top_k }}" min="1" max="20" /></label>
+      <button type="submit" class="btn">Спросить</button>
+      <button type="button" id="btn-search" class="btn btn-ghost">Только поиск</button>
+    </div>
+  </form>
+  <div id="answer" class="answer hidden"></div>
+  <div id="sources" class="sources"></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+  document.getElementById('chat-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    await PrismApp.chat();
+  });
+  document.getElementById('btn-search').addEventListener('click', () => PrismApp.searchOnly());
+</script>
+{% endblock %}

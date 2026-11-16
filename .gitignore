@@ -1,0 +1,49 @@
+# Internal planning / specs (not part of the public diploma deliverable)
+docs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.egg
+
+# Env / secrets
+.env
+.env.local
+*.pem
+
+# Runtime data
+data/uploads/*
+!data/uploads/.gitkeep
+data/bm25/*
+!data/bm25/.gitkeep
+*.db
+
+# Models / caches
+.cache/
+huggingface/
+*.onnx
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+Desktop.ini
+
+# Reports (keep committed summaries only)
+reports/*/
+!reports/.gitkeep
+
+# uv / locks local
+.python-version

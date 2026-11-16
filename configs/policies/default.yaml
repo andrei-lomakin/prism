@@ -1,0 +1,18 @@
+# ActionGate defaults (stage 4). Unknown → ask (fail closed).
+version: 1
+default_mode: ask
+rules:
+  - id: system.search_kb
+    tool: search_kb
+    mode: auto
+    locked: true
+  - id: system.web_search
+    tool: web_search
+    mode: ask
+    locked: false
+  - id: system.remember
+    tool: remember
+    mode: auto
+  - id: system.propose_rule
+    tool: propose_rule
+    mode: ask

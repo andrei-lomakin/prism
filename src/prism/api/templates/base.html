@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}Prism{% endblock %}</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">P</span>
+        <div>
+          <div class="brand-name">Prism</div>
+          <div class="brand-sub">RAG + мультиагентный ассистент</div>
+        </div>
+      </div>
+      <nav class="tabs">
+        <a href="/search" class="tab {% if active == 'search' %}active{% endif %}">Поиск</a>
+        <a href="/upload" class="tab {% if active == 'upload' %}active{% endif %}">База</a>
+        <a href="/settings" class="tab {% if active == 'settings' %}active{% endif %}">Настройки</a>
+      </nav>
+    </header>
+    <main class="content">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

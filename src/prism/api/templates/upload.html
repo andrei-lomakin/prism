@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}База · Prism{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>Загрузка документов</h1>
+  <p class="muted">PDF, DOCX, TXT, MD, HTML или URL. Индексация идёт в worker.</p>
+
+  <form id="upload-form" class="stack">
+    <input type="file" id="file" accept=".pdf,.docx,.txt,.md,.html,.htm" required />
+    <button type="submit" class="btn">Загрузить файл</button>
+  </form>
+
+  <form id="url-form" class="stack" style="margin-top:1.5rem">
+    <input type="url" id="url" placeholder="https://…" required />
+    <button type="submit" class="btn btn-ghost">Загрузить URL</button>
+  </form>
+
+  <div id="job-status" class="muted" style="margin-top:1rem"></div>
+
+  <h2 style="margin-top:2rem">Документы</h2>
+  <div id="docs"></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+  document.getElementById('upload-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    await PrismApp.uploadFile();
+  });
+  document.getElementById('url-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    await PrismApp.uploadUrl();
+  });
+  PrismApp.loadDocuments();
+</script>
+{% endblock %}

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Настройки · Prism{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>Настройки RAG / LLM</h1>
+  <form id="settings-form" class="stack">
+    <label>Embedding model
+      <input name="embedding_model" value="{{ settings.embedding_model }}" />
+    </label>
+    <label>Chunking strategy (C1–C3)
+      <select name="chunking_strategy">
+        {% for c in ['C1','C2','C3'] %}
+        <option value="{{ c }}" {% if settings.chunking_strategy == c %}selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <div class="row">
+      <label>chunk_size <input type="number" name="chunk_size" value="{{ settings.chunk_size }}" /></label>
+      <label>overlap <input type="number" name="chunk_overlap" value="{{ settings.chunk_overlap }}" /></label>
+      <label>top_k <input type="number" name="top_k" value="{{ settings.top_k }}" /></label>
+    </div>
+    <label>Retrieval mode
+      <select name="retrieval_mode">
+        {% for m in ['dense','lexical','hybrid'] %}
+        <option value="{{ m }}" {% if settings.retrieval_mode == m %}selected{% endif %}>{{ m }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>LLM model <input name="llm_model" value="{{ settings.llm_model }}" /></label>
+    <label>Ollama URL <input name="ollama_base_url" value="{{ settings.ollama_base_url }}" /></label>
+    <button type="submit" class="btn">Сохранить</button>
+  </form>
+  <pre id="settings-msg" class="muted"></pre>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+  document.getElementById('settings-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    await PrismApp.saveSettings(e.target);
+  });
+</script>
+{% endblock %}
