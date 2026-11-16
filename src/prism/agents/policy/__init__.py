@@ -1,23 +1,18 @@
 """ActionGate: fail-closed policy for tool execution."""
 
-from __future__ import annotations
+from prism.agents.policy.audit import AuditLog, redact_args
+from prism.agents.policy.gate import ActionGate, GateDecision, GateResult
+from prism.agents.policy.rules import PolicyBundle, PolicyRule, apply_overlay, load_policy, merge_rules
 
-from dataclasses import dataclass
-from typing import Any, Literal
-
-Mode = Literal["auto", "on_request", "ask", "handoff"]
-
-
-@dataclass
-class GateDecision:
-    mode: Mode
-    rule_id: str
-    reason: str
-
-
-class ActionGate:
-    """Sole path to tool.execute (enforced by tests in stage 4)."""
-
-    def evaluate(self, run: Any, tool: Any, args: dict) -> GateDecision:
-        # Unknown → ask (fail closed)
-        return GateDecision(mode="ask", rule_id="default.unknown", reason="no matching rule")
+__all__ = [
+    "ActionGate",
+    "AuditLog",
+    "GateDecision",
+    "GateResult",
+    "PolicyBundle",
+    "PolicyRule",
+    "apply_overlay",
+    "load_policy",
+    "merge_rules",
+    "redact_args",
+]

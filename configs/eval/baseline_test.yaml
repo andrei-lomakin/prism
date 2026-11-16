@@ -1,0 +1,7 @@
+# Held-out test split — do NOT tune hyperparameters on this
+name: baseline_test
+dataset: data/golden/test.jsonl
+config: configs/rag/baseline.yaml
+max_questions: null
+generation: true
+retrieval_only: false

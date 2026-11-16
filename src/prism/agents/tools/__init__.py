@@ -27,3 +27,8 @@ class ToolRegistry:
 
     def all(self) -> list[ToolSpec]:
         return list(self._tools.values())
+
+
+from prism.agents.tools.builtin import ToolContext, build_default_registry  # noqa: E402
+
+__all__ = ["ToolSpec", "ToolRegistry", "ToolContext", "build_default_registry"]

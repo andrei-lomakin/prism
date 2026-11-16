@@ -17,7 +17,7 @@ from prism.api.schemas import (
 from prism.api.settings_store import settings_as_config
 from prism.db.session import get_db
 from prism.llm import LLMGateway
-from prism.rag.generate import SYSTEM_PROMPT, build_rag_prompt, check_citations
+from prism.rag.generate import SYSTEM_PROMPT, build_rag_prompt, check_grounding
 from prism.rag.retrieve import retrieve
 
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -75,7 +75,7 @@ def api_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespons
     except Exception as exc:
         raise HTTPException(503, f"LLM failed ({cfg.llm_model}): {exc}") from exc
 
-    grounding = check_citations(result.text, len(hits))
+    grounding = check_grounding(result.text, [h.text for h in hits])
     citations = [
         Citation(
             n=i,

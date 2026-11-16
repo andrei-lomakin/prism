@@ -62,7 +62,10 @@ class SentenceTransformerEmbedder(Embedder):
         logger.info("Loading embedding model %s", model_name)
         self.model_name = model_name
         self._model = SentenceTransformer(model_name)
-        self.dim = int(self._model.get_sentence_embedding_dimension())
+        dim_fn = getattr(self._model, "get_embedding_dimension", None) or getattr(
+            self._model, "get_sentence_embedding_dimension"
+        )
+        self.dim = int(dim_fn())
         self._cache: dict[str, list[float]] = {}
         self._needs_e5_prefix = "e5" in model_name.lower()
 

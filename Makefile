@@ -1,4 +1,4 @@
-.PHONY: install up down logs demo test lint format migrate
+.PHONY: install up down logs demo test lint format migrate golden ingest-demo
 
 install:
 	pip install -e ".[dev]"
@@ -13,10 +13,22 @@ logs:
 	docker compose logs -f api worker
 
 migrate:
-	python -c "from prism.db.session import init_db; init_db()"
+	prism init-db
 
-demo: up
-	@echo "Open http://localhost:8000 — upload a document, then ask a question on /search"
+golden:
+	prism golden build --target 240
+
+ingest-demo:
+	prism ingest-demo
+
+eval-smoke:
+	prism eval run --config configs/eval/smoke.yaml --skip-generation
+
+eval-baseline:
+	prism eval run --config configs/eval/baseline.yaml
+
+demo: up golden
+	@echo "Open http://127.0.0.1:8000 — then: make ingest-demo (needs Postgres)"
 
 test:
 	pytest -q

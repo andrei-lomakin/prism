@@ -70,9 +70,9 @@ tests/
 
 ## Current status
 
-**Stage 0 foundation is in place:** end-to-end upload → chunk → embed → dense retrieve → grounded answer on Postgres/pgvector, simple UI, worker queue, package skeleton for agents/eval/rerank/rewrite, unit tests and CI.
+**Stages 0–3 in progress:** dense + hybrid RAG (BM25, RRF/weighted), chunking C1–C7, rewrite R0–R5, optional cross-encoder rerank, eval runner + golden set, demo corpus.
 
-Upcoming stages: golden dataset & eval runner, full RAG ablations (chunking C1–C7, hybrid search, reranker, rewriting), agent runtime with policy gate, observability, and a short demo scenario.
+Next: full ablation table on test, agent runtime (Stage 4).
 
 ---
 
@@ -96,6 +96,37 @@ prism init-db
 uvicorn prism.api.app:app --reload --port 8000
 arq prism.worker.settings.WorkerSettings
 ```
+
+Index the demo corpus and (re)build the golden set:
+
+```bash
+prism ingest-demo
+prism golden build --target 240
+```
+
+Eval (Stage 2):
+
+```bash
+# retrieval-only smoke (fast)
+prism eval run --config configs/eval/smoke.yaml --skip-generation
+
+# full baseline on dev (retrieve + generate + judge)
+prism eval run --config configs/eval/baseline.yaml
+```
+
+Reports land in `reports/<run_id>/` (`metrics.json`, `summary.md`, `per_question.jsonl`).
+
+Hybrid ablation example:
+
+```bash
+prism rebuild-bm25
+prism eval run --config configs/eval/ablate_hybrid.yaml --skip-generation
+```
+
+UI: **http://127.0.0.1:8000** (prefer `127.0.0.1` over `localhost` on Windows/WSL).  
+Postgres from host: port **5434** (see `.env.example`).
+
+Default models: embedder `paraphrase-multilingual-MiniLM-L12-v2`, chat `qwen3:4b` via Ollama.
 
 ---
 

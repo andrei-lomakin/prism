@@ -6,7 +6,8 @@ services:
       POSTGRES_PASSWORD: prism
       POSTGRES_DB: prism
     ports:
-      - "5432:5432"
+      # Host 5434 — Windows often already has a native Postgres on 5432
+      - "5434:5432"
     volumes:
       - prism_pg:/var/lib/postgresql/data
     healthcheck:

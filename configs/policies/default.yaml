@@ -1,18 +1,56 @@
-# ActionGate defaults (stage 4). Unknown → ask (fail closed).
+# ActionGate defaults. Unknown tool → ask (fail closed).
+# Hierarchy merge: system → workspace → agent. Locked rules cannot be weakened.
 version: 1
 default_mode: ask
-rules:
-  - id: system.search_kb
-    tool: search_kb
-    mode: auto
-    locked: true
-  - id: system.web_search
-    tool: web_search
-    mode: ask
-    locked: false
-  - id: system.remember
-    tool: remember
-    mode: auto
-  - id: system.propose_rule
-    tool: propose_rule
-    mode: ask
+layers:
+  system:
+    - id: system.search_kb
+      tool: search_kb
+      mode: auto
+      locked: true
+    - id: system.get_document
+      tool: get_document
+      mode: auto
+      locked: true
+    - id: system.rewrite_query
+      tool: rewrite_query
+      mode: auto
+      locked: true
+    - id: system.verify_citations
+      tool: verify_citations
+      mode: auto
+      locked: true
+    - id: system.recall
+      tool: recall
+      mode: auto
+      locked: true
+    - id: system.remember
+      tool: remember
+      mode: auto
+      locked: false
+    - id: system.spawn_subagents
+      tool: spawn_subagents
+      mode: auto
+      locked: true
+    - id: system.subagent_status
+      tool: subagent_status
+      mode: auto
+      locked: true
+    - id: system.subagent_followup
+      tool: subagent_followup
+      mode: ask
+      locked: false
+    - id: system.subagent_stop
+      tool: subagent_stop
+      mode: ask
+      locked: false
+    - id: system.web_search
+      tool: web_search
+      mode: ask
+      locked: false
+    - id: system.propose_rule
+      tool: propose_rule
+      mode: ask
+      locked: true
+  workspace: []
+  agent: []

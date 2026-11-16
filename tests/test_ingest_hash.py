@@ -1,0 +1,6 @@
+from prism.ingest.parsers import content_hash
+
+
+def test_content_hash_stable():
+    assert content_hash("abc") == content_hash("abc")
+    assert content_hash("abc") != content_hash("abcd")

@@ -1,0 +1,25 @@
+# Ablation: hybrid dense+BM25 with RRF
+name: hybrid_rrf
+chunking:
+  strategy: C2
+  size: 256
+  overlap: 32
+embedding:
+  model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+retrieval:
+  mode: hybrid
+  top_k: 5
+  fusion: rrf
+  rrf_k: 60
+rerank:
+  enabled: false
+rewrite:
+  strategy: R0
+generation:
+  provider: ollama
+  model: qwen3:4b
+packer:
+  max_chunks: 8
+  max_tokens: 2048
+  max_per_doc: 3
+  min_score: 0.0

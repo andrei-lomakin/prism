@@ -15,3 +15,5 @@ class RetrievedChunk:
     section_path: str | None = None
     page: int | None = None
     space: str = "personal"
+    doc_key: str | None = None
+    meta: dict | None = None

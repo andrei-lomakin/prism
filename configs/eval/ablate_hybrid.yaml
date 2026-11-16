@@ -1,0 +1,6 @@
+name: ablate_hybrid
+dataset: data/golden/dev.jsonl
+config: configs/rag/hybrid_rrf.yaml
+max_questions: 60
+generation: false
+retrieval_only: true

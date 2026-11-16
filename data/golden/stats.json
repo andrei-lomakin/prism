@@ -1,0 +1,55 @@
+{
+  "total": 240,
+  "seeds": 36,
+  "dev": {
+    "n": 170,
+    "by_type": {
+      "factoid": 51,
+      "numeric": 23,
+      "comparison": 20,
+      "multi-hop": 43,
+      "unanswerable": 33
+    },
+    "by_lang": {
+      "en": 122,
+      "ru": 48
+    },
+    "reviewed": 24,
+    "unanswerable_pct": 19.4,
+    "multihop_pct": 25.3
+  },
+  "test": {
+    "n": 70,
+    "by_type": {
+      "factoid": 21,
+      "numeric": 9,
+      "comparison": 8,
+      "multi-hop": 18,
+      "unanswerable": 14
+    },
+    "by_lang": {
+      "ru": 21,
+      "en": 49
+    },
+    "reviewed": 12,
+    "unanswerable_pct": 20.0,
+    "multihop_pct": 25.7
+  },
+  "all": {
+    "n": 240,
+    "by_type": {
+      "factoid": 72,
+      "numeric": 32,
+      "comparison": 28,
+      "multi-hop": 61,
+      "unanswerable": 47
+    },
+    "by_lang": {
+      "en": 171,
+      "ru": 69
+    },
+    "reviewed": 36,
+    "unanswerable_pct": 19.6,
+    "multihop_pct": 25.4
+  }
+}

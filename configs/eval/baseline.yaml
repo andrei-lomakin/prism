@@ -1,0 +1,7 @@
+# Full Stage-2 baseline eval (retrieval + generation + LLM judge)
+name: baseline
+dataset: data/golden/dev.jsonl
+config: configs/rag/baseline.yaml
+max_questions: null
+generation: true
+retrieval_only: false
