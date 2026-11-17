@@ -38,6 +38,7 @@
         const data = await r.json().catch(() => ({}));
         if (!r.ok) { alert(data.detail || 'Не удалось одобрить'); return; }
         if (data.resume_error) alert('Одобрено, но запуск не продолжился: ' + data.resume_error);
+        else if (data.run && data.run.state === 'failed') alert(data.run.answer || 'Одобрено, но выполнение завершилось ошибкой');
         loadApprovals();
       };
       el.querySelector('[data-act=no]').onclick = async () => {

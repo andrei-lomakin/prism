@@ -36,6 +36,7 @@ def _call(
             "tool": tool_code,
             "approval_id": result.approval_id,
             "mode": result.decision.mode,
+            "outcome": result.outcome,
         }
     out = dict(result.output) if isinstance(result.output, dict) else {"value": result.output}
     out["tool"] = tool_code
@@ -122,13 +123,29 @@ def run_web(
         count_search=True,
     )
     out["role"] = "web"
-    # Optionally fetch first URL if search returned links and gate allows
+    if out.get("error") == "approval required":
+        out["phase"] = "web_search"
+        out["results"] = []
+        out["fetch_queue"] = []
+        return out
+    status = str(out.get("status") or ("ok" if out.get("results") else "empty"))
+    out["status"] = status
+    if out.get("dedup") or status in ("error", "empty") or out.get("ok") is False:
+        out["results"] = []
+        out["web_unavailable"] = True
+        out["phase"] = "web_done"
+        out["fetch_queue"] = []
+        return out
     results = list(out.get("results") or [])
-    pages: list[dict[str, Any]] = []
-    for item in results[:2]:
+    queue: list[str] = []
+    for item in results:
         url = item.get("url")
-        if not url:
-            continue
+        if url and url not in queue:
+            queue.append(str(url))
+        if len(queue) == 2:
+            break
+    pages: list[dict[str, Any]] = []
+    for index, url in enumerate(queue):
         page = _call(
             gate=gate,
             registry=registry,
@@ -137,13 +154,21 @@ def run_web(
             tool_code="fetch_page",
             args={"url": url},
         )
-        pages.append(page)
         if page.get("error") == "approval required":
-            out["approval_id"] = page.get("approval_id")
+            out["phase"] = "fetch_page"
+            out["fetch_queue"] = queue[index:]
+            out["pages"] = pages
+            out["results"] = results
             out["error"] = "approval required"
-            break
-    if pages:
-        out["pages"] = pages
+            out["approval_id"] = page.get("approval_id")
+            out["pending_tool"] = "fetch_page"
+            out["pending_args"] = {"url": url}
+            return out
+        pages.append(page)
+    out["pages"] = pages
+    out["results"] = results
+    out["phase"] = "web_done"
+    out["fetch_queue"] = []
     return out
 
 

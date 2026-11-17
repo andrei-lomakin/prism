@@ -504,7 +504,7 @@ const PrismApp = {
       query: document.getElementById('query').value.trim(),
       mode: mode === 'search' ? 'rag' : mode,
       space: document.getElementById('space')?.value || 'all',
-      history: this._thread.slice(-8),
+      history: this._thread.filter((t) => !t.approval).slice(-8),
     };
   },
 
@@ -529,10 +529,11 @@ const PrismApp = {
         ? this._sourcesDetailsHtml(t.citations)
         : '';
       const details = (t.role === 'assistant' && t.details_html) ? t.details_html : '';
+      const gate = (t.role === 'assistant' && t.approval) ? this._approvalCardHtml(t) : '';
       const bodyClass = t.role === 'assistant' ? 'thread-body md-body' : 'thread-body';
       return `<article class="thread-turn is-${this._escapeAttr(t.role)}" data-turn-cites="${t.role === 'assistant' && t.citations ? '1' : '0'}">` +
         `<div class="thread-role">${role}</div>` +
-        `<div class="${bodyClass}">${body}</div>${cites}${details}</article>`;
+        `<div class="${bodyClass}">${body}</div>${gate}${cites}${details}</article>`;
     }).join('');
     el.querySelectorAll('article.thread-turn').forEach((art, idx) => {
       const turn = this._thread[idx];
@@ -544,8 +545,15 @@ const PrismApp = {
         });
       });
     });
+    el.querySelectorAll('[data-approve], [data-deny]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-approve') || btn.getAttribute('data-deny');
+        this.decideApproval(id, btn.hasAttribute('data-approve'));
+      });
+    });
     this._highlightActiveDialog();
     this._scrollChatBottom();
+    this._setComposerLocked(this._thread.some((t) => t.approval));
   },
 
   clearThread() {
@@ -629,6 +637,7 @@ const PrismApp = {
         role: m.role,
         content: m.content,
         citations: m.citations || null,
+        approval: m.approval || null,
       }));
       const { live, panel, answer, sources } = this._els();
       if (live) live.classList.add('hidden');
@@ -685,6 +694,7 @@ const PrismApp = {
       role: t.role,
       content: t.content,
       ...(t.citations ? { citations: t.citations } : {}),
+      ...(t.approval ? { approval: t.approval } : {}),
     }));
     const body = {
       id: this._dialogId,
@@ -713,18 +723,7 @@ const PrismApp = {
     const q = String(query || '').trim();
     const a = String(answer || '').trim();
     if (!q || !a) return;
-    let detailsHtml = '';
-    if (this._isChatPage()) {
-      const { steps, trace } = this._els();
-      const stepsClone = steps && steps.children.length ? steps.outerHTML : '';
-      const traceClone = (trace && !trace.classList.contains('hidden') ? trace.outerHTML : '') || '';
-      if (stepsClone || traceClone) {
-        detailsHtml =
-          `<details class="run-details thread-details">` +
-          `<summary class="run-summary"><span>Ход ответа</span><span class="run-summary-hint muted">шаги</span></summary>` +
-          `${stepsClone}${traceClone}</details>`;
-      }
-    }
+    const detailsHtml = this._detailsHtml();
     this._thread.push({ role: 'user', content: q });
     this._thread.push({
       role: 'assistant',
@@ -746,10 +745,152 @@ const PrismApp = {
     return this.chatStream();
   },
 
+  _detailsHtml() {
+    if (!this._isChatPage()) return '';
+    const { steps, trace } = this._els();
+    const stepsClone = steps && steps.children.length ? steps.outerHTML : '';
+    const traceClone = (trace && !trace.classList.contains('hidden') ? trace.outerHTML : '') || '';
+    if (!stepsClone && !traceClone) return '';
+    return `<details class="run-details thread-details">` +
+      `<summary class="run-summary"><span>Ход ответа</span><span class="run-summary-hint muted">шаги</span></summary>` +
+      `${stepsClone}${traceClone}</details>`;
+  },
+
+  _toolRu(code) {
+    const names = {
+      web_search: 'поиск в интернете',
+      fetch_page: 'чтение страницы',
+      python_sandbox: 'песочница Python',
+      memory_rollback: 'откат памяти',
+    };
+    return names[code] || code || 'действие';
+  },
+
+  _approvalLead(approval) {
+    return `Ждёт одобрения: ${this._toolRu(approval && approval.tool)}`;
+  },
+
+  _approvalArgsText(approval) {
+    const args = (approval && approval.args) || {};
+    if (args.query) return String(args.query);
+    if (args.url) return String(args.url);
+    try {
+      return JSON.stringify(args, null, 2);
+    } catch {
+      return '';
+    }
+  },
+
+  _approvalCardHtml(turn) {
+    const approval = turn.approval || {};
+    if (turn._deciding) {
+      return `<div class="approval-card"><p class="approval-title"><span class="spinner inline"></span> Продолжаем тот же запуск…</p></div>`;
+    }
+    const args = this._approvalArgsText(approval);
+    const argsHtml = args
+      ? `<pre class="approval-args">${this._escape(args)}</pre>`
+      : '';
+    return `<div class="approval-card">` +
+      `<p class="approval-title">Нужно разрешение: ${this._escape(this._toolRu(approval.tool))}</p>` +
+      argsHtml +
+      `<div class="row">` +
+      `<button type="button" class="btn" data-approve="${this._escapeAttr(approval.id)}">Одобрить</button>` +
+      `<button type="button" class="btn btn-ghost" data-deny="${this._escapeAttr(approval.id)}">Отклонить</button>` +
+      `</div></div>`;
+  },
+
+  _setComposerLocked(locked) {
+    const form = document.getElementById('chat-form');
+    if (!form) return;
+    form.querySelectorAll('textarea, button, input, select').forEach((el) => {
+      if (el.classList.contains('sr-only')) return;
+      el.disabled = !!locked;
+    });
+    const area = document.getElementById('query');
+    if (area) {
+      area.placeholder = locked
+        ? 'Сначала одобрите или отклоните действие агента…'
+        : 'Спросите или уточните…';
+    }
+  },
+
+  _holdForApproval(query, data) {
+    const approval = data.approval;
+    const q = String(query || '').trim();
+    if (!q || !approval || !approval.id) return;
+    this._thread.push({ role: 'user', content: q });
+    this._thread.push({
+      role: 'assistant',
+      content: this._approvalLead(approval),
+      approval,
+      details_html: this._detailsHtml(),
+    });
+    if (this._thread.length > 16) this._thread = this._thread.slice(-16);
+    const { live, panel } = this._els();
+    if (live) live.classList.add('hidden');
+    if (panel) {
+      panel.classList.add('hidden');
+      panel.classList.remove('running');
+    }
+    this._setBusy(false);
+    this.renderThread();
+    this.saveDialog();
+  },
+
+  async decideApproval(id, allow) {
+    const msg = this._thread.find((t) => t.approval && String(t.approval.id) === String(id));
+    if (!msg || msg._deciding) return;
+    msg._deciding = true;
+    this.renderThread();
+    try {
+      const res = await fetch(`/api/approvals/${encodeURIComponent(id)}/${allow ? 'approve' : 'deny'}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (res.status === 404 || res.status === 410) {
+          msg.content = data.detail || 'Запрос на одобрение уже не действует.';
+          msg.approval = null;
+        } else {
+          msg.content = data.detail || 'Не удалось обработать решение. Можно повторить.';
+        }
+        return;
+      }
+      if (!allow) {
+        msg.content = 'Действие отклонено. Запуск остановлен.';
+        msg.approval = null;
+        return;
+      }
+      if (data.resume_error) {
+        msg.content = `Одобрено, но запуск не продолжился: ${data.resume_error}`;
+        msg.approval = null;
+        return;
+      }
+      const run = data.run || {};
+      if (run.state === 'awaiting_approval' && run.approval && run.approval.id) {
+        msg.approval = run.approval;
+        msg.content = this._approvalLead(run.approval);
+        return;
+      }
+      msg.approval = null;
+      msg.content = run.answer || (run.state === 'failed' ? 'Ошибка выполнения' : '');
+      if (run.citations && run.citations.length) msg.citations = run.citations;
+    } catch (err) {
+      msg.content = `${err}. Можно повторить.`;
+    } finally {
+      msg._deciding = false;
+      this.renderThread();
+      this.saveDialog();
+    }
+  },
+
   async chatStream() {
     const payload = this._chatPayload();
     const { mode } = payload;
     if (!payload.query) return;
+    if (this._thread.some((t) => t.approval)) return;
     const q = payload.query;
     const input = document.getElementById('query');
     if (input && this._isChatPage()) input.value = '';
@@ -822,6 +963,10 @@ const PrismApp = {
             this._appendAnswer(data.text || '');
           }
           if (event === 'final') {
+            if (data.state === 'awaiting_approval' && data.approval && data.approval.id) {
+              this._holdForApproval(q, data);
+              continue;
+            }
             const answerText = data.answer || this._els().answer?.textContent || '';
             this._showAnswer(answerText);
             this._applyGrounding(data);

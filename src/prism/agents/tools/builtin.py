@@ -8,7 +8,6 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote_plus
 
-import httpx
 from bs4 import BeautifulSoup
 from sqlalchemy.orm import Session
 
@@ -18,6 +17,7 @@ from prism.agents.policy.rules import apply_overlay
 from prism.agents.tools import ToolRegistry, ToolSpec
 from prism.config import Settings, get_settings
 from prism.db.models import Chunk, Document
+from prism.net.safe_http import UnsafeUrlError, assert_public_http_url, safe_get
 from prism.rag.generate.grounding import check_citations, check_grounding
 from prism.rag.retrieve import retrieve
 from prism.rag.rewrite import rewrite as rewrite_query_fn
@@ -192,62 +192,154 @@ def build_default_registry(ctx: ToolContext) -> ToolRegistry:
         return {"accepted": ok, "reason": reason, "tool": tool, "mode": mode}
 
     def web_search(query: str) -> dict[str, Any]:
-        """External search (ask-gated). Offline → deterministic mock hits."""
+        """External search (ask-gated). Mock mode is labeled; live mode never invents hits."""
         q = (query or "").strip()
-        mock = [
-            {
-                "title": f"Overview: {q[:80]}",
-                "url": f"https://example.com/search?q={quote_plus(q)}",
-                "snippet": f"Mock web snippet about {q}. Replace after approval + network.",
-            },
-            {
-                "title": f"Comparison notes: {q[:60]}",
-                "url": "https://example.com/compare",
-                "snippet": "Side-by-side criteria, trade-offs, latency vs quality.",
-            },
-        ]
         if getattr(ctx.settings, "web_search_mock", True):
-            return {"query": q, "results": mock, "provider": "mock"}
-        # Lightweight HTML scrape of DuckDuckGo lite (best-effort; fail → mock)
+            mock = [
+                {
+                    "title": f"Overview: {q[:80]}",
+                    "url": f"https://example.com/search?q={quote_plus(q)}",
+                    "snippet": f"Mock web snippet about {q}. Offline demo, not a live search.",
+                    "origin": "mock",
+                    "provider": "mock",
+                },
+                {
+                    "title": f"Comparison notes: {q[:60]}",
+                    "url": "https://example.com/compare",
+                    "snippet": "Side-by-side criteria, trade-offs, latency vs quality.",
+                    "origin": "mock",
+                    "provider": "mock",
+                },
+            ]
+            return {
+                "query": q,
+                "results": mock,
+                "provider": "mock",
+                "origin": "mock",
+                "ok": True,
+                "status": "ok",
+            }
+        url = f"https://lite.duckduckgo.com/lite/?q={quote_plus(q)}"
         try:
-            url = f"https://lite.duckduckgo.com/lite/?q={quote_plus(q)}"
-            with httpx.Client(timeout=12.0, follow_redirects=True) as client:
-                resp = client.get(url, headers={"User-Agent": "PrismResearchBot/0.1"})
-                resp.raise_for_status()
-            soup = BeautifulSoup(resp.text, "lxml")
-            results: list[dict[str, Any]] = []
-            for a in soup.select("a.result-link")[:5]:
-                href = a.get("href") or ""
-                title = a.get_text(" ", strip=True)
-                if href and title:
-                    results.append({"title": title, "url": href, "snippet": title})
-            if not results:
-                return {"query": q, "results": mock, "provider": "mock_fallback"}
-            return {"query": q, "results": results, "provider": "duckduckgo_lite"}
+            body, _ctype, _final = safe_get(
+                url,
+                timeout=12.0,
+                max_bytes=2_000_000,
+                headers={"User-Agent": "PrismResearchBot/0.1"},
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning("web_search failed: %s", exc)
-            return {"query": q, "results": mock, "provider": "mock_error", "error": str(exc)}
+            return {
+                "query": q,
+                "results": [],
+                "provider": "duckduckgo_lite",
+                "origin": "live",
+                "ok": False,
+                "status": "error",
+                "error": str(exc),
+            }
+        try:
+            soup = BeautifulSoup(body.decode("utf-8", errors="replace"), "lxml")
+            results: list[dict[str, Any]] = []
+            for anchor in soup.select("a.result-link")[:5]:
+                href = anchor.get("href") or ""
+                title = anchor.get_text(" ", strip=True)
+                if href and title:
+                    results.append(
+                        {
+                            "title": title,
+                            "url": href,
+                            "snippet": title,
+                            "origin": "live",
+                            "provider": "duckduckgo_lite",
+                        }
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("web_search parse failed: %s", exc)
+            return {
+                "query": q,
+                "results": [],
+                "provider": "duckduckgo_lite",
+                "origin": "live",
+                "ok": False,
+                "status": "error",
+                "error": f"parse: {exc}",
+            }
+        if not results:
+            return {
+                "query": q,
+                "results": [],
+                "provider": "duckduckgo_lite",
+                "origin": "live",
+                "ok": True,
+                "status": "empty",
+                "error": None,
+            }
+        return {
+            "query": q,
+            "results": results,
+            "provider": "duckduckgo_lite",
+            "origin": "live",
+            "ok": True,
+            "status": "ok",
+        }
 
     def fetch_page(url: str) -> dict[str, Any]:
-        if getattr(ctx.settings, "web_search_mock", True) or "example.com" in url:
+        mock = bool(getattr(ctx.settings, "web_search_mock", True))
+        try:
+            assert_public_http_url(url, resolve=not mock)
+        except UnsafeUrlError as exc:
+            return {
+                "url": url,
+                "ok": False,
+                "error": str(exc),
+                "origin": "blocked",
+                "status": "error",
+                "text": "",
+            }
+        if mock:
+            text = f"Mock page body for {url}. Offline demo, not a fetched page."
             return {
                 "url": url,
                 "title": "Mock page",
-                "text": f"Mock page body for {url}. Useful for offline demos.",
-                "chars": 48,
+                "text": text,
+                "chars": len(text),
+                "origin": "mock",
+                "provider": "mock",
+                "ok": True,
+                "status": "ok",
             }
         try:
-            with httpx.Client(timeout=15.0, follow_redirects=True) as client:
-                resp = client.get(url, headers={"User-Agent": "PrismResearchBot/0.1"})
-                resp.raise_for_status()
-            soup = BeautifulSoup(resp.text, "lxml")
+            body, _ctype, final = safe_get(
+                url,
+                timeout=15.0,
+                max_bytes=1_000_000,
+                headers={"User-Agent": "PrismResearchBot/0.1"},
+            )
+            soup = BeautifulSoup(body.decode("utf-8", errors="replace"), "lxml")
             for tag in soup(["script", "style", "noscript"]):
                 tag.decompose()
-            title = (soup.title.get_text(strip=True) if soup.title else url)[:200]
+            title = (soup.title.get_text(strip=True) if soup.title else final)[:200]
             text = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))[:4000]
-            return {"url": url, "title": title, "text": text, "chars": len(text)}
+            return {
+                "url": final,
+                "title": title,
+                "text": text,
+                "chars": len(text),
+                "origin": "live",
+                "provider": "live",
+                "ok": True,
+                "status": "ok",
+            }
         except Exception as exc:  # noqa: BLE001
-            return {"url": url, "error": str(exc)}
+            return {
+                "url": url,
+                "ok": False,
+                "error": str(exc),
+                "origin": "live",
+                "status": "error",
+                "text": "",
+            }
 
     def build_comparison_table(
         objective: str,

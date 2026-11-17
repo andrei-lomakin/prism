@@ -27,16 +27,8 @@ Prism keeps the ML core explicit and ablatable. The web UI and API stay delibera
 | **Ingest** | PDF, DOCX, Markdown, TXT, HTML, URL → normalized text → chunks |
 | **RAG** | Pluggable chunking, embeddings, dense / lexical / hybrid search, reranker, query rewriting, grounded generation with citation checks |
 | **Eval** | Golden dataset, retrieval & generation metrics, ablation reports (quality × latency × $), git provenance in every report |
-| **Agents** | Orchestrator + Retriever / Web / Analyst / Critic, ActionGate, budgets, distill, traces |
+| **Agents** | Orchestrator + Retriever / Web / Analyst / Critic. Fail-closed ActionGate, per-run budgets, checkpointed resume, approvals inside the chat turn |
 | **Ops** | Docker Compose (API, worker, Postgres+pgvector, Redis), Ollama or OpenAI-compatible APIs |
-
----
-
-## Current status
-
-**Stages 0–7 complete** (diploma slice per TZ). Honest gaps: Cohen's κ (human second pass), GIF not committed, sync subagents, corpus still << TZ 300–1000 (expandable via `just expand-corpus`).
-
-Defense pack: [`docs/DEFENSE.md`](docs/DEFENSE.md) · [`docs/slides.md`](docs/slides.md) · [`docs/FINAL_RESULTS.md`](docs/FINAL_RESULTS.md) · [`docs/adr/`](docs/adr/)
 
 ---
 
@@ -49,9 +41,11 @@ pip install -e ".[dev]"   # or: just install
 just demo                 # init-db + ingest-demo + rebuild-bm25
 ```
 
-Open **http://127.0.0.1:8000** (prefer `127.0.0.1` on Windows).
+Open **http://127.0.0.1:8000**. Compose publishes the API and Postgres on loopback only (`127.0.0.1:8000`, `127.0.0.1:5434`).
 
-Full walkthrough: [`docs/DEMO.md`](docs/DEMO.md).
+Containers load [`.env.example`](.env.example). Generation expects Ollama on the host at port `11434`. `docker compose --profile local-llm up` starts Ollama inside the stack instead. Optional HTTP Basic: put `AUTH_PASSWORD` in `.env` before `docker compose up` (Compose interpolates it; `/api/health` stays open).
+
+The UI is Chat (plain answer or agent), Search, Knowledge base, Journal, Eval, and Settings. An agent action that needs permission shows **Approve** / **Deny** on that message. There is no separate approvals screen.
 
 ---
 
@@ -75,9 +69,7 @@ prism eval compare      # → reports/ABLATION_TABLE.md + ABLATION_RECALL.svg
 prism eval kappa --a data/golden/annotator_a.example.jsonl --b data/golden/annotator_b.example.jsonl
 ```
 
-Canonical numbers: [`docs/FINAL_RESULTS.md`](docs/FINAL_RESULTS.md).
-
-Optional auth: set `AUTH_PASSWORD` in `.env` (HTTP Basic on `/api/*`; `/api/health` stays open).
+The retrieval numbers from that held-out set are in the table below.
 
 ---
 
@@ -95,7 +87,17 @@ UI (Jinja) ──► FastAPI
 
 Design rules: one interface per concern · fail-closed tool policy · grounded `[n]` answers · measure, don’t assert.
 
-Deep dive (Russian, gitignored in some clones): `docs/architecture.md`.
+### Agent control
+
+ActionGate defaults to ask. An unknown tool waits. Knowledge-base search, query rewrite, citation checks, and subagent spawn are allowed through. `web_search`, `fetch_page`, the Python sandbox, and memory rollback wait for an explicit decision.
+
+The decision is two buttons on the agent message. Approving continues the **same run**: same id, retrieved chunks, budget, and step history. Time spent waiting on the user is excluded from the active-time budget. Search and page fetch are separate approvals. A second click on an approval that already ran does not execute the tool again. If the approved tool raises, the run is marked failed and is not retried. If synthesis fails after a successful tool, the tool output stays on the checkpoint and only synthesis is repeated.
+
+Compose ships with `WEB_SEARCH_MOCK=false` (see `.env.example`): live search goes to DuckDuckGo lite. A timeout, an HTTP error, or an empty parse comes back as an empty result list and an explicit status. The answer can still use the knowledge-base hits, and it says that external data is missing. With the variable unset, the application default is mock mode, and those snippets are labeled as test data.
+
+URL ingest and `fetch_page` share one fetcher. It allows HTTP(S) only, rejects credentials in the URL, and blocks loopback, private, link-local, and metadata addresses, including IPv4-mapped IPv6. Each redirect is checked before the next request. The address validated for that hop is the address the socket connects to. An approval does not skip this check. The pin is local to the process for that one request.
+
+Approvals sit in memory inside the API process (`APPROVAL_TTL_SECONDS`, default 300). The workflow is checkpointed and role-based (retriever, web, analyst, critic). It follows that fixed path rather than inventing new tool sequences on its own.
 
 ---
 
@@ -108,7 +110,7 @@ Deep dive (Russian, gitignored in some clones): `docs/architecture.md`.
 | nDCG@10 | 0.407 | **0.695** |
 | Hit@5 | 0.667 | **0.949** |
 
-Paired Δ Recall@5 = +0.218 (95% CI 0.115–0.321, P(Δ>0)=1.0). Details: [`docs/FINAL_RESULTS.md`](docs/FINAL_RESULTS.md).
+Paired Δ Recall@5 = +0.218 (95% CI 0.115–0.321, P(Δ>0)=1.0).
 
 Default chat model: `qwen2.5:1.5b` (Ollama; light default for weak GPUs — swap via Settings / `LLM_MODEL`). Embedder: `paraphrase-multilingual-MiniLM-L12-v2`. Postgres host port **5434**.
 
@@ -120,16 +122,6 @@ Requires [just](https://github.com/casey/just).
 
 ```bash
 just check / just fix / just test / just lint / just fmt
-```
-
----
-
-## Slides
-
-Marp source: `docs/slides.md` → prebuilt `docs/slides.pdf`.
-
-```bash
-npx --yes @marp-team/marp-cli docs/slides.md -o docs/slides.pdf
 ```
 
 ---

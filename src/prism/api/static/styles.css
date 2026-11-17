@@ -1036,6 +1036,22 @@ a.btn { text-decoration: none; }
   background: #e7f4ef;
   color: #0f6b5c;
 }
+.approval-card {
+  margin-top: .75rem;
+  padding: .75rem .85rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f7f4ee;
+}
+.approval-title { margin: 0 0 .45rem; font-weight: 650; }
+.approval-args {
+  margin: 0 0 .7rem;
+  white-space: pre-wrap;
+  font-size: .82rem;
+  max-height: 8rem;
+  overflow: auto;
+}
+.approval-card .row { align-items: center; }
 .answer-note.is-warn {
   background: #f8eee4;
   color: #8a4b12;

@@ -87,6 +87,29 @@ def test_parent_awaits_children_aggregate():
     assert status["done"] is True
 
 
+def test_spawn_stops_later_children_on_approval():
+    mgr = SubagentManager()
+    seen: list[str] = []
+
+    def runner(child: ChildRun) -> dict:
+        seen.append(child.role)
+        if child.role == "web":
+            return {"error": "approval required", "approval_id": "apr-1"}
+        return {"ok": True}
+
+    agg = mgr.spawn(
+        parent_id="p",
+        roles=["retriever", "web", "analyst", "critic"],
+        objective="q",
+        runner=runner,
+    )
+    assert seen == ["retriever", "web"]
+    states = {child["role"]: child["state"] for child in agg["children"]}
+    assert states["retriever"] == "completed"
+    assert states["analyst"] == "cancelled"
+    assert states["critic"] == "cancelled"
+
+
 def test_multi_orchestrator_spawns_subagents():
     rt = AgentRuntime(db=None, llm=_mock_llm, persist=False)
     ans = rt.handle("Сравни dense и lexical поиск по метрикам")

@@ -365,6 +365,7 @@ def api_chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> Stre
                         },
                         "trace_id": str(answer.run_id),
                         "state": answer.state,
+                        "approval": answer.approval,
                         "usage": answer.usage,
                         "provisional_until_grounding": False,
                     },

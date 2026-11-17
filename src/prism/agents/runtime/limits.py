@@ -27,6 +27,7 @@ class RunUsage:
     skipped_dedup: int = 0
     forced_synthesis: bool = False
     partial: bool = False
+    active_seconds: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -37,7 +38,25 @@ class RunUsage:
             "skipped_dedup": self.skipped_dedup,
             "forced_synthesis": self.forced_synthesis,
             "partial": self.partial,
+            "active_seconds": self.active_seconds,
+            "read_fingerprints": sorted(self.read_fingerprints),
         }
+
+
+def usage_from_dict(data: dict[str, Any] | None) -> RunUsage:
+    raw = data or {}
+    fps = raw.get("read_fingerprints") or []
+    return RunUsage(
+        steps=int(raw.get("steps") or 0),
+        searches=int(raw.get("searches") or 0),
+        tokens=int(raw.get("tokens") or 0),
+        cost_usd=float(raw.get("cost_usd") or 0.0),
+        read_fingerprints=set(fps),
+        skipped_dedup=int(raw.get("skipped_dedup") or 0),
+        forced_synthesis=bool(raw.get("forced_synthesis")),
+        partial=bool(raw.get("partial")),
+        active_seconds=float(raw.get("active_seconds") or 0.0),
+    )
 
 
 def fingerprint_call(tool: str, args: dict[str, Any]) -> str:
@@ -57,10 +76,15 @@ class LimitTracker:
             or u.searches >= b.max_searches
             or u.tokens >= b.max_tokens
             or u.cost_usd >= b.max_cost_usd
+            or u.active_seconds >= b.max_active_seconds
         )
 
     def note_step(self) -> None:
         self.usage.steps += 1
+
+    def note_active(self, seconds: float) -> None:
+        if seconds > 0:
+            self.usage.active_seconds += float(seconds)
 
     def note_search(self) -> None:
         self.usage.searches += 1

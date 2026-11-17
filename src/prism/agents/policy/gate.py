@@ -32,6 +32,8 @@ class GateResult:
     output: Any = None
     error: str | None = None
     approval_id: str | None = None
+    # executed | approval_required | handoff | error. Mode alone is not an outcome.
+    outcome: str = "executed"
 
 
 ApprovalFn = Callable[[GateDecision, ToolSpec, dict[str, Any]], bool]
@@ -98,7 +100,12 @@ class ActionGate:
                 decision="handoff",
                 args=args,
             )
-            return GateResult(decision=decision, executed=False, error="handoff required")
+            return GateResult(
+                decision=decision,
+                executed=False,
+                error="handoff required",
+                outcome="handoff",
+            )
 
         if decision.mode in ("ask", "on_request"):
             approved = self.approvals.is_approved(run_id=run_id, tool=tool.code, args=args)
@@ -124,6 +131,7 @@ class ActionGate:
                     executed=False,
                     error="approval required",
                     approval_id=rec.id,
+                    outcome="approval_required",
                 )
 
         try:
@@ -138,7 +146,7 @@ class ActionGate:
                 args=args,
                 error=str(exc),
             )
-            return GateResult(decision=decision, executed=False, error=str(exc))
+            return GateResult(decision=decision, executed=False, error=str(exc), outcome="error")
 
         summary = _summarize(output)
         self.audit.record(
@@ -150,7 +158,7 @@ class ActionGate:
             args=args,
             result_summary=summary,
         )
-        return GateResult(decision=decision, executed=True, output=output)
+        return GateResult(decision=decision, executed=True, output=output, outcome="executed")
 
 
 def invoke_tool(execute: Callable[..., Any], args: dict[str, Any]) -> Any:

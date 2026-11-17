@@ -16,10 +16,18 @@ from prism.db.session import get_db
 router = APIRouter(prefix="/api/dialogs", tags=["dialogs"], dependencies=[Depends(require_user)])
 
 
+class DialogApproval(BaseModel):
+    id: str = Field(..., max_length=64)
+    run_id: str | int | None = None
+    tool: str = Field(..., max_length=64)
+    args: dict[str, Any] = Field(default_factory=dict)
+
+
 class DialogMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str = Field(..., min_length=1, max_length=20000)
     citations: list[dict[str, Any]] | None = None
+    approval: DialogApproval | None = None
 
 
 class DialogUpsert(BaseModel):

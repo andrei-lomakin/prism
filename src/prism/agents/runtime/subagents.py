@@ -70,13 +70,18 @@ class SubagentManager:
         batch = SubagentBatch(batch_id=batch_id, parent_id=parent_id, children=children)
         self._batches[batch_id] = batch
 
-        for child in children:
+        for idx, child in enumerate(children):
             try:
                 child.result = runner(child)
                 child.state = "completed"
             except Exception as exc:  # noqa: BLE001
                 child.result = {"error": str(exc)}
                 child.state = "failed"
+            if isinstance(child.result, dict) and child.result.get("error") == "approval required":
+                for rest in children[idx + 1 :]:
+                    rest.state = "cancelled"
+                    rest.result = {"skipped": "awaiting_approval"}
+                break
 
         return batch.aggregate()
 

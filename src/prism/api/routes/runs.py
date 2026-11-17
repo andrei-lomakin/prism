@@ -30,19 +30,50 @@ def _coerce_run_id(run_id: str | int | None) -> int | None:
     return None
 
 
+def _pending_approval(row: AgentRun) -> dict[str, Any] | None:
+    """Next ask-gated action on a run that is still waiting."""
+    result = row.result if isinstance(row.result, dict) else {}
+    checkpoint = result.get("checkpoint") if isinstance(result.get("checkpoint"), dict) else {}
+    pending = checkpoint.get("pending") if isinstance(checkpoint.get("pending"), dict) else {}
+    tool = str(pending.get("tool") or checkpoint.get("tool") or "")
+    approval_id = (
+        pending.get("approval_id") or result.get("approval_id") or checkpoint.get("approval_id")
+    )
+    if not tool or not approval_id:
+        return None
+    args = pending.get("args") if isinstance(pending.get("args"), dict) else checkpoint.get("args")
+    return {
+        "id": str(approval_id),
+        "run_id": str(row.id),
+        "tool": tool,
+        "args": dict(args or {}),
+    }
+
+
 def _resume_approved(db: Session, rec: ApprovalRecord) -> dict[str, Any] | None:
     """Continue the run that asked for this approval. Same run id, original args."""
     run_id = _coerce_run_id(rec.run_id)
     if run_id is None:
         return None
     row = db.get(AgentRun, run_id)
-    if row is None or row.state != "awaiting_approval":
+    if row is None:
+        return None
+    recoverable = row.state == "failed" and (row.result or {}).get("failure_stage") == "synthesize"
+    if row.state != "awaiting_approval" and not recoverable:
         return None
     from prism.agents import AgentRuntime
 
     runtime = AgentRuntime(db, settings=settings_as_config(db), persist=True)
     answer = runtime.resume(run_id)
-    return {"run_id": answer.run_id, "state": answer.state, "answer": answer.answer}
+    out: dict[str, Any] = {
+        "run_id": answer.run_id,
+        "state": answer.state,
+        "answer": answer.answer,
+        "citations": answer.citations,
+    }
+    if answer.state == "awaiting_approval":
+        out["approval"] = _pending_approval(row)
+    return out
 
 
 class ApprovalDecision(BaseModel):
@@ -233,7 +264,8 @@ def resume_run(run_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
     row = db.get(AgentRun, run_id)
     if row is None:
         raise HTTPException(404, "run not found")
-    if row.state != "awaiting_approval":
+    recoverable = row.state == "failed" and (row.result or {}).get("failure_stage") == "synthesize"
+    if row.state != "awaiting_approval" and not recoverable:
         raise HTTPException(409, f"run state is {row.state}")
     from prism.agents import AgentRuntime
 

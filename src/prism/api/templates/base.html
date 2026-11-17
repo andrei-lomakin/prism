@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{% block title %}Призма{% endblock %}</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20261117aj" />
+  <link rel="stylesheet" href="/static/styles.css?v=20261117al" />
 </head>
 <body class="{% block body_class %}{% endblock %}">
   <div class="page">
@@ -18,7 +18,6 @@
         <a href="/search" class="tab {% if active == 'search' %}active{% endif %}">Поиск</a>
         <a href="/upload" class="tab {% if active == 'upload' %}active{% endif %}">База</a>
         <a href="/trace" class="tab {% if active == 'trace' %}active{% endif %}">Журнал</a>
-        <a href="/approvals" class="tab {% if active == 'approvals' %}active{% endif %}">Одобрения</a>
         <a href="/eval" class="tab {% if active == 'eval' %}active{% endif %}">Оценка</a>
         <a href="/settings" class="tab {% if active == 'settings' %}active{% endif %}">Настройки</a>
       </nav>
@@ -27,7 +26,7 @@
       {% block content %}{% endblock %}
     </main>
   </div>
-  <script src="/static/app.js?v=20261117aj"></script>
+  <script src="/static/app.js?v=20261117al"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

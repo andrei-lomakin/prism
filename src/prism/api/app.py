@@ -129,9 +129,10 @@ def page_trace_log(request: Request, trace_id: str) -> HTMLResponse:
     )
 
 
-@app.get("/approvals", response_class=HTMLResponse)
-def page_approvals(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request, "approvals.html", {"active": "approvals"})
+@app.get("/approvals")
+def page_approvals() -> RedirectResponse:
+    """Approvals happen inside the chat turn."""
+    return RedirectResponse("/chat", status_code=302)
 
 
 @app.get("/eval", response_class=HTMLResponse)
