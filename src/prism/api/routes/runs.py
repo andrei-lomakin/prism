@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from prism.agents.policy import get_approval_store
@@ -19,6 +20,131 @@ router = APIRouter(prefix="/api", tags=["runs"], dependencies=[Depends(require_u
 
 class ApprovalDecision(BaseModel):
     reason: str | None = None
+
+
+@router.get("/runs")
+def list_runs(
+    db: Session = Depends(get_db),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> dict[str, Any]:
+    """Paginated agent runs (newest first). Top-level + children included."""
+    total = db.query(func.count(AgentRun.id)).scalar() or 0
+    rows = (
+        db.query(AgentRun)
+        .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    step_counts = dict(
+        db.query(Step.run_id, func.count(Step.id)).group_by(Step.run_id).all()
+    )
+    items = []
+    for row in rows:
+        n_steps = int(step_counts.get(row.id) or 0)
+        objective = (row.objective or "").strip().replace("\n", " ")
+        items.append(
+            {
+                "kind": "run",
+                "id": str(row.id),
+                "title": objective[:120] + ("…" if len(objective) > 120 else ""),
+                "subtitle": f"{row.role} · {n_steps} шаг(ов)",
+                "state": row.state,
+                "role": row.role,
+                "parent_id": row.parent_id,
+                "n_steps": n_steps,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+        )
+    return {
+        "items": items,
+        "page": page,
+        "page_size": page_size,
+        "total": int(total),
+        "pages": max(1, (int(total) + page_size - 1) // page_size),
+    }
+
+
+@router.get("/pipeline-logs")
+def list_pipeline_logs(
+    db: Session = Depends(get_db),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> dict[str, Any]:
+    """Unified journal: persisted agent runs + recent in-memory RAG traces."""
+    run_total = int(db.query(func.count(AgentRun.id)).scalar() or 0)
+    run_rows = (
+        db.query(AgentRun)
+        .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+        .limit(500)
+        .all()
+    )
+    step_counts = dict(
+        db.query(Step.run_id, func.count(Step.id)).group_by(Step.run_id).all()
+    )
+    items: list[dict[str, Any]] = []
+    run_ids = set()
+    for row in run_rows:
+        run_ids.add(str(row.id))
+        n_steps = int(step_counts.get(row.id) or 0)
+        objective = (row.objective or "").strip().replace("\n", " ")
+        items.append(
+            {
+                "kind": "run",
+                "id": str(row.id),
+                "title": objective[:120] + ("…" if len(objective) > 120 else ""),
+                "subtitle": f"агент · {row.role} · {n_steps} шаг(ов)",
+                "state": row.state,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "sort_ms": row.created_at.timestamp() * 1000 if row.created_at else 0.0,
+            }
+        )
+    for tr in trace_buffer.list_summaries():
+        if tr["id"] in run_ids:
+            continue
+        items.append(
+            {
+                **tr,
+                "subtitle": f"поиск/RAG · {tr.get('n_spans', 0)} span(ов)",
+                "created_at": None,
+                "sort_ms": float(tr.get("started_ms") or 0.0),
+            }
+        )
+    items.sort(key=lambda x: float(x.get("sort_ms") or 0.0), reverse=True)
+    total = len(items)
+    start = (page - 1) * page_size
+    page_items = items[start : start + page_size]
+    for it in page_items:
+        it.pop("sort_ms", None)
+        it.pop("started_ms", None)
+        it.pop("n_spans", None)
+    return {
+        "items": page_items,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "pages": max(1, (total + page_size - 1) // page_size),
+        "runs_in_db": run_total,
+    }
+
+
+@router.delete("/pipeline-logs")
+def clear_pipeline_logs(db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Wipe journal: persisted agent runs/steps + in-memory RAG traces."""
+    n_steps = db.query(Step).delete()
+    # Break self-FK before bulk delete (parent_id → agent_runs.id).
+    db.query(AgentRun).update({AgentRun.parent_id: None}, synchronize_session=False)
+    n_runs = db.query(AgentRun).delete()
+    db.commit()
+    n_traces = len(trace_buffer.list_summaries())
+    trace_buffer.clear()
+    return {
+        "ok": True,
+        "deleted_runs": int(n_runs or 0),
+        "deleted_steps": int(n_steps or 0),
+        "cleared_traces": int(n_traces),
+    }
 
 
 @router.get("/runs/{run_id}")

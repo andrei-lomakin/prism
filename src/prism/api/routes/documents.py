@@ -164,19 +164,38 @@ def get_document(document_id: int, db: Session = Depends(get_db)) -> DocumentOut
 def list_chunks(
     document_id: int,
     db: Session = Depends(get_db),
-    limit: int = 50,
-    offset: int = 0,
+    page: int = 1,
+    page_size: int = 20,
+    limit: int | None = None,
+    offset: int | None = None,
 ) -> dict:
     doc = db.get(Document, document_id)
     if doc is None:
         raise HTTPException(404, "Document not found")
     q = db.query(Chunk).filter(Chunk.document_id == document_id).order_by(Chunk.chunk_index.asc())
     total = q.count()
-    rows = q.offset(max(0, offset)).limit(min(200, max(1, limit))).all()
+    # Prefer page/page_size; keep limit/offset for older callers.
+    if limit is not None or offset is not None:
+        page_size = min(200, max(1, int(limit or 20)))
+        off = max(0, int(offset or 0))
+        page = off // page_size + 1
+    else:
+        page = max(1, page)
+        page_size = min(200, max(1, page_size))
+        off = (page - 1) * page_size
+    pages = max(1, (total + page_size - 1) // page_size) if total else 1
+    page = min(page, pages)
+    off = (page - 1) * page_size
+    rows = q.offset(off).limit(page_size).all()
     return {
         "document_id": document_id,
         "name": doc.name,
+        "space": doc.space,
+        "status": doc.status,
         "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": pages,
         "items": [
             {
                 "id": c.id,
@@ -235,6 +254,43 @@ def delete_document(document_id: int, db: Session = Depends(get_db)) -> dict:
         except OSError:
             pass
     return {"document_id": document_id, "deleted_chunks": n_chunks}
+
+
+@router.delete("/documents")
+def clear_documents(db: Session = Depends(get_db)) -> dict:
+    """Delete entire knowledge base (documents, chunks, jobs) and source files."""
+    busy = (
+        db.query(func.count(Document.id))
+        .filter(Document.status.in_(("pending", "indexing")))
+        .scalar()
+        or 0
+    )
+    if busy:
+        raise HTTPException(
+            409,
+            f"Дождитесь окончания индексации ({busy} документ(ов) в работе)",
+        )
+    docs = db.query(Document).all()
+    n_docs = len(docs)
+    n_chunks = int(db.query(func.count(Chunk.id)).scalar() or 0)
+    paths = [Path(d.source_path) for d in docs if d.source_path]
+    for doc in docs:
+        db.delete(doc)
+    db.commit()
+    removed_files = 0
+    for path in paths:
+        if path.is_file():
+            try:
+                path.unlink()
+                removed_files += 1
+            except OSError:
+                pass
+    return {
+        "ok": True,
+        "deleted_documents": n_docs,
+        "deleted_chunks": n_chunks,
+        "removed_files": removed_files,
+    }
 
 
 @router.get("/jobs/{job_id}", response_model=JobOut)

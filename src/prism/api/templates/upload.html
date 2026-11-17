@@ -2,46 +2,97 @@
 {% block title %}База · Prism{% endblock %}
 {% block content %}
 <section class="panel">
-  <h1>База документов</h1>
-  <p class="lede muted">PDF, DOCX, TXT, MD, HTML или URL. Индексация идёт в фоне (worker).</p>
+  <div class="panel-head">
+    <div class="panel-title-row">
+      <h1>База документов</h1>
+      <button type="button" class="btn btn-danger-ghost" id="clear-kb">Очистить базу</button>
+    </div>
+    <p class="page-intro">Загрузите файл или ссылку — «Призма» проиндексирует и положит в выбранное пространство. Вкладку можно закрыть, пока идёт обработка.</p>
+  </div>
 
-  <label class="field" style="margin-top:1rem">
-    <div class="field-head"><span class="field-title">Пространство загрузки</span></div>
-    <select id="upload-space">
-      <option value="personal">Личное</option>
-      <option value="project">Проект</option>
-      <option value="shared" selected>Общее (демо)</option>
+  <div class="upload-box">
+    <div class="field-head">
+      <span class="field-title">Куда загрузить</span>
+    </div>
+    <div class="seg seg-wrap" role="radiogroup" aria-label="Пространство загрузки">
+      <label class="seg-item">
+        <input type="radio" name="upload-space" value="personal" />
+        <span>Личное</span>
+      </label>
+      <label class="seg-item">
+        <input type="radio" name="upload-space" value="project" />
+        <span>Проект</span>
+      </label>
+      <label class="seg-item">
+        <input type="radio" name="upload-space" value="shared" checked />
+        <span>Общее</span>
+      </label>
+    </div>
+    <select id="upload-space" class="sr-only" tabindex="-1" aria-hidden="true">
+      <option value="personal">personal</option>
+      <option value="project">project</option>
+      <option value="shared" selected>shared</option>
     </select>
-  </label>
 
-  <form id="upload-form" class="stack" style="margin-top:1rem">
-    <input type="file" id="file" accept=".pdf,.docx,.txt,.md,.html,.htm" required />
-    <button type="submit" class="btn">Загрузить файл</button>
-  </form>
+    <div class="upload-rows">
+      <form id="upload-form" class="upload-row">
+        <input type="file" id="file" accept=".pdf,.docx,.txt,.md,.html,.htm" required />
+        <button type="submit" class="btn btn-sm">Файл</button>
+      </form>
+      <form id="url-form" class="upload-row">
+        <input type="url" id="url" placeholder="https://…" required />
+        <button type="submit" class="btn btn-ghost btn-sm">Ссылка</button>
+      </form>
+    </div>
+    <div id="job-status" class="muted upload-status"></div>
+  </div>
 
-  <form id="url-form" class="stack" style="margin-top:1.5rem">
-    <input type="url" id="url" placeholder="https://…" required />
-    <button type="submit" class="btn btn-ghost">Загрузить по ссылке</button>
-  </form>
-
-  <div id="job-status" class="muted" style="margin-top:1rem"></div>
-
-  <h2 style="margin-top:2rem">Документы</h2>
-  <div id="docs"></div>
-  <h2 style="margin-top:2rem">Превью фрагментов</h2>
-  <div id="chunk-preview" class="muted">Выберите документ → «Фрагменты»</div>
+  <div class="panel-block">
+    <div class="panel-title-row">
+      <h2>Документы</h2>
+      <span id="docs-meta" class="muted"></span>
+    </div>
+    <div id="docs" class="doc-list"></div>
+    <div id="docs-pager" class="log-pager hidden">
+      <button type="button" class="btn btn-ghost btn-sm" id="docs-prev">Назад</button>
+      <span id="docs-page-label" class="muted"></span>
+      <button type="button" class="btn btn-ghost btn-sm" id="docs-next">Вперёд</button>
+    </div>
+  </div>
 </section>
 {% endblock %}
 {% block scripts %}
 <script>
+  const PAGE_SIZE = 10;
+
+  function syncUploadSpace() {
+    const checked = document.querySelector('input[name="upload-space"]:checked');
+    const sel = document.getElementById('upload-space');
+    if (checked && sel) sel.value = checked.value;
+  }
+  document.querySelectorAll('input[name="upload-space"]').forEach((el) => {
+    el.addEventListener('change', syncUploadSpace);
+  });
+  syncUploadSpace();
+
   document.getElementById('upload-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    syncUploadSpace();
     await PrismApp.uploadFile();
   });
   document.getElementById('url-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    syncUploadSpace();
     await PrismApp.uploadUrl();
   });
-  PrismApp.loadDocuments();
+  document.getElementById('clear-kb').addEventListener('click', () => PrismApp.clearKnowledgeBase());
+  document.getElementById('docs-prev').addEventListener('click', () => {
+    if (PrismApp._docsPage > 1) PrismApp.loadDocuments(PrismApp._docsPage - 1, PAGE_SIZE);
+  });
+  document.getElementById('docs-next').addEventListener('click', () => {
+    PrismApp.loadDocuments(PrismApp._docsPage + 1, PAGE_SIZE);
+  });
+
+  PrismApp.loadDocuments(1, PAGE_SIZE);
 </script>
 {% endblock %}

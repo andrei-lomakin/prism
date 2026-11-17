@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}Прогон оценки · Prism{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="log-detail-head">
+    <div class="log-detail-title-row">
+      <a class="btn btn-ghost btn-sm back-link" href="/eval">← К оценке</a>
+      <h1 id="eval-title">Загрузка…</h1>
+      <a class="btn btn-sm hidden" id="btn-pdf" href="#">Скачать PDF</a>
+    </div>
+    <p id="eval-meta" class="muted"></p>
+  </div>
+  <div id="eval-body" class="log-detail-body"></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const runId = {{ run_id|tojson }};
+  const titleEl = document.getElementById('eval-title');
+  const metaEl = document.getElementById('eval-meta');
+  const bodyEl = document.getElementById('eval-body');
+
+  const esc = (s) => (window.PrismApp ? PrismApp._escape(s) : String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
+
+  const fmt = (v) => (v == null || Number.isNaN(Number(v)) ? '—' : Number(v).toFixed(3));
+  const fmtMs = (v) => (v == null ? '—' : `${Math.round(Number(v))} мс`);
+
+  const qText = (w) => {
+    const q = w.question || w.query || w.gold_question || '';
+    if (typeof q === 'string') return q;
+    if (q && typeof q === 'object') return q.text || q.question || JSON.stringify(q);
+    return w.question_id || '—';
+  };
+
+  async function load() {
+    bodyEl.innerHTML = '<p class="muted"><span class="spinner inline"></span> Загрузка…</p>';
+    try {
+      const res = await fetch(`/api/eval/runs/${encodeURIComponent(runId)}?worst_n=5`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Ошибка');
+      titleEl.textContent = data.id || runId;
+      metaEl.textContent = [
+        data.role === 'scientific' ? 'scientific' : 'diagnostic',
+        data.rag?.retrieval || '',
+        data.n_questions != null ? `${data.n_questions} вопр.` : '',
+        data.dataset || '',
+      ].filter(Boolean).join(' · ');
+
+      const pdfBtn = document.getElementById('btn-pdf');
+      pdfBtn.href = `/api/eval/runs/${encodeURIComponent(data.dir || data.id || runId)}/pdf`;
+      pdfBtn.classList.remove('hidden');
+      pdfBtn.textContent = data.has_pdf ? 'Скачать PDF' : 'Собрать PDF';
+
+      const m = data.metrics || {};
+      const rag = data.rag || {};
+      const worst = data.worst || [];
+
+      const metricsHtml = `
+        <div class="metrics-grid">
+          <div class="metric-card"><div class="metric-label">Recall@5</div><div class="metric-value">${esc(fmt(m['recall@5']))}</div></div>
+          <div class="metric-card"><div class="metric-label">MRR@10</div><div class="metric-value">${esc(fmt(m['mrr@10']))}</div></div>
+          <div class="metric-card"><div class="metric-label">nDCG@10</div><div class="metric-value">${esc(fmt(m['ndcg@10']))}</div></div>
+          <div class="metric-card"><div class="metric-label">Hit@5</div><div class="metric-value">${esc(fmt(m['hit@5']))}</div></div>
+          <div class="metric-card"><div class="metric-label">p95 retrieve</div><div class="metric-value">${esc(fmtMs(m.retrieve_p95_ms))}</div></div>
+          <div class="metric-card"><div class="metric-label">$/1k</div><div class="metric-value">${esc(m.usd_per_1k == null ? '—' : Number(m.usd_per_1k).toFixed(4))}</div></div>
+        </div>`;
+
+      const setupHtml = `
+        <h2 class="log-section-title">Конфигурация</h2>
+        <div class="answer md-body">
+          <p><strong>eval</strong>: ${esc(data.eval_config || '—')}<br>
+          <strong>rag</strong>: ${esc(data.rag_config || '—')}<br>
+          <strong>retrieval</strong>: ${esc(rag.retrieval || '—')} ·
+          <strong>chunking</strong>: ${esc(rag.chunking || '—')} ·
+          <strong>rewrite</strong>: ${esc(rag.rewrite || '—')} ·
+          <strong>rerank</strong>: ${esc(rag.rerank || '—')}</p>
+        </div>`;
+
+      const worstHtml = `
+        <h2 class="log-section-title">Худшие вопросы (по Recall@5)</h2>
+        ${worst.length ? `<ol class="log-steps">${worst.map((w) => {
+          const ret = w.retrieval || {};
+          const score = ret['recall@5'] != null ? ret['recall@5'] : (ret['hit@5'] ? 1 : 0);
+          return `<li>
+            <div class="log-step-title"><b>${esc(w.question_id || '')}</b> · recall ${esc(fmt(score))}</div>
+            <div class="muted">${esc(qText(w))}</div>
+          </li>`;
+        }).join('')}</ol>` : '<p class="muted">per_question.jsonl нет или пуст.</p>'}`;
+
+      const summaryHtml = data.summary_md
+        ? `<h2 class="log-section-title">Summary</h2>
+           <div class="answer md-body">${PrismApp._renderMarkdown(data.summary_md)}</div>`
+        : '';
+
+      const rawHtml = `
+        <h2 class="log-section-title">Сырой metrics.json</h2>
+        <pre class="answer log-json">${esc(JSON.stringify(data.raw, null, 2))}</pre>`;
+
+      bodyEl.innerHTML = metricsHtml + setupHtml + worstHtml + summaryHtml + rawHtml;
+    } catch (err) {
+      titleEl.textContent = runId;
+      bodyEl.innerHTML = `<p class="muted">${esc(String(err))}</p>`;
+    }
+  }
+
+  load();
+})();
+</script>
+{% endblock %}

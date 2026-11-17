@@ -80,6 +80,28 @@ class TraceBuffer:
     def get(self, trace_id: str) -> list[dict[str, Any]]:
         return [s.to_dict() for s in self._spans.get(trace_id, [])]
 
+    def list_summaries(self) -> list[dict[str, Any]]:
+        """Newest-first summaries for UI journal (in-memory RAG traces)."""
+        out: list[dict[str, Any]] = []
+        for tid in reversed(self._order):
+            spans = self._spans.get(tid) or []
+            if not spans:
+                continue
+            root = spans[0]
+            names = [s.name for s in spans[:6]]
+            out.append(
+                {
+                    "kind": "trace",
+                    "id": tid,
+                    "title": root.name,
+                    "subtitle": " · ".join(names),
+                    "n_spans": len(spans),
+                    "status": "error" if any(s.status == "error" for s in spans) else "ok",
+                    "started_ms": root.start_ms,
+                }
+            )
+        return out
+
     def clear(self) -> None:
         self._spans.clear()
         self._order.clear()

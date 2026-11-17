@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Фрагменты · Prism{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="log-detail-head">
+    <div class="log-detail-title-row">
+      <a class="btn btn-ghost btn-sm back-link" href="/upload">← К базе</a>
+      <h1 id="doc-title">Загрузка…</h1>
+    </div>
+    <p id="doc-meta" class="muted"></p>
+  </div>
+  <div id="chunk-list" class="chunk-list" aria-live="polite"></div>
+  <div id="chunk-pager" class="log-pager hidden">
+    <button type="button" class="btn btn-ghost btn-sm" id="chunk-prev">Назад</button>
+    <span id="chunk-page-label" class="muted"></span>
+    <button type="button" class="btn btn-ghost btn-sm" id="chunk-next">Вперёд</button>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const docId = {{ document_id|tojson }};
+  const PAGE_SIZE = 10;
+  let page = 1;
+  let pages = 1;
+
+  const titleEl = document.getElementById('doc-title');
+  const metaEl = document.getElementById('doc-meta');
+  const listEl = document.getElementById('chunk-list');
+  const pagerEl = document.getElementById('chunk-pager');
+  const pageLabel = document.getElementById('chunk-page-label');
+
+  const esc = (s) => (window.PrismApp ? PrismApp._escape(s) : String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
+
+  const spaceRu = { personal: 'личное', project: 'проект', shared: 'общее' };
+  const statusRu = {
+    pending: 'ожидает',
+    indexing: 'индексация',
+    indexed: 'проиндексирован',
+    error: 'ошибка',
+  };
+
+  async function load() {
+    listEl.innerHTML = '<p class="muted"><span class="spinner inline"></span> Загрузка фрагментов…</p>';
+    try {
+      const res = await fetch(`/api/documents/${docId}/chunks?page=${page}&page_size=${PAGE_SIZE}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Ошибка');
+      pages = data.pages || 1;
+      page = data.page || 1;
+      titleEl.textContent = data.name || `Документ #${docId}`;
+      metaEl.textContent = [
+        `#${data.document_id}`,
+        statusRu[data.status] || data.status || '',
+        spaceRu[data.space] || data.space || '',
+        `${data.total || 0} фрагм.`,
+      ].filter(Boolean).join(' · ');
+
+      const items = data.items || [];
+      if (!items.length) {
+        listEl.innerHTML = '<p class="muted">Фрагментов нет — документ ещё не проиндексирован или пуст.</p>';
+        pagerEl.classList.add('hidden');
+        return;
+      }
+      listEl.innerHTML = items.map((c) => `
+        <article class="chunk-card">
+          <div class="chunk-card-head">
+            <strong>#${c.chunk_index}</strong>
+            <span class="muted">${esc(c.section_path || 'без раздела')} · ${c.token_count || 0} ток.${c.page != null ? ` · стр. ${c.page}` : ''}</span>
+          </div>
+          <pre class="chunk-card-body">${esc(c.text || '')}</pre>
+        </article>
+      `).join('');
+      pagerEl.classList.toggle('hidden', pages <= 1);
+      pageLabel.textContent = `стр. ${page} из ${pages} · всего ${data.total}`;
+      document.getElementById('chunk-prev').disabled = page <= 1;
+      document.getElementById('chunk-next').disabled = page >= pages;
+    } catch (err) {
+      titleEl.textContent = `Документ #${docId}`;
+      listEl.innerHTML = `<p class="muted">${esc(String(err))}</p>`;
+      pagerEl.classList.add('hidden');
+    }
+  }
+
+  document.getElementById('chunk-prev').addEventListener('click', () => {
+    if (page > 1) { page -= 1; load(); }
+  });
+  document.getElementById('chunk-next').addEventListener('click', () => {
+    if (page < pages) { page += 1; load(); }
+  });
+  load();
+})();
+</script>
+{% endblock %}

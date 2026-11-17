@@ -18,6 +18,7 @@ RetrievalMode = Literal["dense", "lexical", "hybrid"]
 HybridFusion = Literal["rrf", "weighted"]
 RewriteStrategy = Literal["R0", "R1", "R2", "R3", "R4", "R5"]
 SpaceName = Literal["personal", "project", "shared"]
+VectorSearchMode = Literal["exact", "hnsw"]
 
 
 class Settings(BaseSettings):
@@ -48,6 +49,9 @@ class Settings(BaseSettings):
     chunk_overlap: int = Field(default=32, ge=0, le=1024)
     top_k: int = Field(default=5, ge=1, le=50)
     retrieval_mode: RetrievalMode = "dense"
+    # Dense ANN: exact = sequential scan; hnsw = pgvector HNSW index (approx).
+    vector_search: VectorSearchMode = "exact"
+    hnsw_ef_search: int = Field(default=40, ge=10, le=400)
     space_default: SpaceName = "personal"
     # Runtime filter from chat UI (None = all spaces). Not a durable .env knob.
     space_filter: str | None = None

@@ -18,6 +18,84 @@ const PrismApp = {
       .replace(/"/g, '&quot;');
   },
 
+  /** Lightweight markdown → safe HTML (answers, journal). Escapes first. */
+  _renderMarkdown(src) {
+    let text = String(src ?? '').replace(/\r\n/g, '\n');
+    const blocks = [];
+    text = text.replace(/```([\w-]*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+      const i = blocks.length;
+      blocks.push(
+        `<pre class="md-code"><code${lang ? ` data-lang="${this._escapeAttr(lang)}"` : ''}>${this._escape(code.replace(/\n$/, ''))}</code></pre>`
+      );
+      return `\u0000BLK${i}\u0000`;
+    });
+
+    const renderTable = (chunk) => {
+      const lines = chunk.trim().split('\n').filter(Boolean);
+      if (lines.length < 2 || !/^\|/.test(lines[0])) return null;
+      const split = (line) => line.replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+      const head = split(lines[0]);
+      if (!/^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?$/.test(lines[1])) return null;
+      const rows = lines.slice(2).map(split);
+      let html = '<table class="md-table"><thead><tr>';
+      head.forEach((h) => { html += `<th>${this._inlineMd(h)}</th>`; });
+      html += '</tr></thead><tbody>';
+      rows.forEach((r) => {
+        html += '<tr>';
+        head.forEach((_, i) => { html += `<td>${this._inlineMd(r[i] || '')}</td>`; });
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      return html;
+    };
+
+    const parts = text.split(/\n{2,}/);
+    const htmlParts = parts.map((part) => {
+      const trimmed = part.trim();
+      if (!trimmed) return '';
+      if (/^\u0000BLK\d+\u0000$/.test(trimmed)) return trimmed;
+      const table = renderTable(trimmed);
+      if (table) return table;
+      if (/^#{1,3} /.test(trimmed)) {
+        return trimmed.split('\n').map((line) => {
+          const m = /^(#{1,3})\s+(.+)$/.exec(line);
+          if (!m) return `<p>${this._inlineMd(line)}</p>`;
+          const lvl = m[1].length;
+          return `<h${lvl}>${this._inlineMd(m[2])}</h${lvl}>`;
+        }).join('');
+      }
+      if ((/^[-*]\s+/m.test(trimmed) || /^\d+\.\s+/m.test(trimmed))
+          && trimmed.split('\n').every((l) => !l.trim() || /^([-*]|\d+\.)\s+/.test(l))) {
+        const items = trimmed.split('\n').filter(Boolean).map((l) => {
+          const m = /^[-*]\s+(.+)$/.exec(l) || /^\d+\.\s+(.+)$/.exec(l);
+          return `<li>${this._inlineMd(m ? m[1] : l)}</li>`;
+        });
+        const ordered = /^\d+\./.test(trimmed);
+        return ordered ? `<ol>${items.join('')}</ol>` : `<ul>${items.join('')}</ul>`;
+      }
+      if (/^>\s?/m.test(trimmed)) {
+        const body = trimmed.split('\n').map((l) => l.replace(/^>\s?/, '')).join(' ');
+        return `<blockquote>${this._inlineMd(body)}</blockquote>`;
+      }
+      return `<p>${trimmed.split('\n').map((l) => this._inlineMd(l)).join('<br>')}</p>`;
+    });
+
+    let html = htmlParts.join('\n');
+    html = html.replace(/\u0000BLK(\d+)\u0000/g, (_, i) => blocks[Number(i)] || '');
+    return html;
+  },
+
+  _inlineMd(s) {
+    let t = this._escape(s);
+    t = t.replace(/`([^`]+)`/g, '<code>$1</code>');
+    t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    t = t.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+    t = t.replace(/(^|[^*\w])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+    t = t.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    t = t.replace(/\[(\d+)\]/g, '<span class="cite-ref">[$1]</span>');
+    return t;
+  },
+
   _modeRu(mode) {
     const m = String(mode || '');
     const parts = m.split('+').filter(Boolean);
@@ -117,14 +195,12 @@ const PrismApp = {
       sources: document.getElementById('sources'),
       trace: document.getElementById('trace-link'),
       ask: document.getElementById('btn-ask'),
-      search: document.getElementById('btn-search'),
     };
   },
 
   _setBusy(busy) {
-    const { ask, search } = this._els();
+    const { ask } = this._els();
     if (ask) ask.disabled = busy;
-    if (search) search.disabled = busy;
   },
 
   _beginRun(label) {
@@ -249,16 +325,22 @@ const PrismApp = {
 
   _showTrace(traceEl, mode, data) {
     if (!traceEl || !data.trace_id) return;
-    const q = mode === 'agent'
-      ? `run_id=${encodeURIComponent(data.trace_id)}`
-      : `trace_id=${encodeURIComponent(data.trace_id)}`;
+    const href = mode === 'agent'
+      ? `/trace/run/${encodeURIComponent(data.trace_id)}`
+      : `/trace/log/${encodeURIComponent(data.trace_id)}`;
     const modeLabel = this._modeRu(data.retrieval_mode || mode);
     const ground = data.grounding_ok == null
       ? ''
-      : (data.grounding_ok ? ' · опора на источники: да' : ' · опора на источники: нет');
+      : (data.grounding_ok
+        ? '<span class="badge ok">опора на источники</span>'
+        : '<span class="badge err">слабая опора</span>');
     traceEl.classList.remove('hidden');
-    traceEl.innerHTML =
-      `Трасса: <a href="/trace?${q}">${this._escape(data.trace_id)}</a> · ${this._escape(modeLabel)}${ground}`;
+    traceEl.innerHTML = `
+      <div class="trace-meta">
+        <span class="muted">${this._escape(modeLabel)}</span>
+        ${ground}
+      </div>
+      <a class="btn btn-ghost btn-sm" href="${href}">Открыть в журнале</a>`;
   },
 
   _showCitations(sourcesEl, citations) {
@@ -286,10 +368,11 @@ const PrismApp = {
   },
 
   _chatPayload() {
+    // top_k берётся из Настроек на сервере (не дублируем контрол на форме)
+    const mode = document.getElementById('mode')?.value || 'rag';
     return {
       query: document.getElementById('query').value.trim(),
-      top_k: Number(document.getElementById('top_k').value || 5),
-      mode: document.getElementById('mode')?.value || 'rag',
+      mode: mode === 'search' ? 'rag' : mode,
       space: document.getElementById('space')?.value || 'all',
     };
   },
@@ -522,10 +605,17 @@ const PrismApp = {
     tick();
   },
 
-  async loadDocuments() {
+  _docsPage: 1,
+  _docsPageSize: 10,
+
+  async loadDocuments(page, pageSize) {
     const box = document.getElementById('docs');
-    if (!box) return;
-    const res = await fetch('/api/documents?page_size=50');
+    if (!box) return 1;
+    if (page != null) this._docsPage = page;
+    if (pageSize != null) this._docsPageSize = pageSize;
+    const p = this._docsPage;
+    const ps = this._docsPageSize;
+    const res = await fetch(`/api/documents?page=${p}&page_size=${ps}`);
     const data = await res.json();
     const statusRu = {
       pending: 'ожидает',
@@ -534,6 +624,8 @@ const PrismApp = {
       error: 'ошибка',
     };
     const spaceRu = { personal: 'личное', project: 'проект', shared: 'общее' };
+    const pages = data.pages || 1;
+    this._docsPage = data.page || p;
     box.innerHTML = (data.items || []).map((d) => `
       <div class="doc-row">
         <div>
@@ -541,37 +633,134 @@ const PrismApp = {
           <span class="badge ${d.status === 'indexed' ? 'ok' : d.status === 'error' ? 'err' : ''}">${statusRu[d.status] || d.status}</span>
           <div class="muted">${d.num_chunks} фрагм. · ${spaceRu[d.space] || d.space}</div>
         </div>
-        <div class="row">
-          <button class="btn btn-ghost" onclick="PrismApp.previewChunks(${d.id})">Фрагменты</button>
-          <button class="btn btn-ghost" onclick="PrismApp.deleteDoc(${d.id})">Удалить</button>
+        <div class="row doc-row-actions">
+          <a class="btn btn-ghost btn-sm" href="/upload/${d.id}">Фрагменты</a>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="PrismApp.deleteDoc(${d.id})">Удалить</button>
         </div>
       </div>`).join('') || '<p class="muted">Пока пусто</p>';
-  },
 
-  async previewChunks(id) {
-    const box = document.getElementById('chunk-preview');
-    if (!box) return;
-    box.innerHTML = '<span class="spinner inline"></span> Загрузка…';
-    const res = await fetch(`/api/documents/${id}/chunks?limit=20`);
-    const data = await res.json();
-    if (!res.ok) {
-      box.textContent = data.detail || 'Ошибка';
-      return;
+    const pager = document.getElementById('docs-pager');
+    const label = document.getElementById('docs-page-label');
+    const meta = document.getElementById('docs-meta');
+    const prev = document.getElementById('docs-prev');
+    const next = document.getElementById('docs-next');
+    if (meta) meta.textContent = data.total ? `всего ${data.total}` : '';
+    if (pager) {
+      pager.classList.toggle('hidden', pages <= 1);
+      if (label) label.textContent = `стр. ${this._docsPage} из ${pages}`;
+      if (prev) prev.disabled = this._docsPage <= 1;
+      if (next) next.disabled = this._docsPage >= pages;
     }
-    box.innerHTML = `<h3>${this._escape(data.name)} · всего ${data.total}</h3>` +
-      (data.items || []).map((c) => `
-        <div class="doc-row">
-          <div>
-            <strong>#${c.chunk_index}</strong>
-            <span class="muted">${this._escape(c.section_path || '')} · ${c.token_count || 0} ток.</span>
-            <pre class="answer" style="white-space:pre-wrap;margin:.4rem 0 0">${this._escape(c.text || '')}</pre>
-          </div>
-        </div>`).join('');
+    return pages;
   },
 
   async deleteDoc(id) {
-    await fetch(`/api/documents/${id}`, { method: 'DELETE' });
-    this.loadDocuments();
+    const ok = await this.confirm({
+      title: 'Удалить документ?',
+      body: 'Документ и все его фрагменты будут удалены из базы знаний.',
+      confirmLabel: 'Удалить',
+      danger: true,
+    });
+    if (!ok) return;
+    const res = await fetch(`/api/documents/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.detail || 'Не удалось удалить');
+      return;
+    }
+    const pages = await this.loadDocuments(this._docsPage, this._docsPageSize);
+    if (this._docsPage > pages) await this.loadDocuments(pages, this._docsPageSize);
+  },
+
+  async clearKnowledgeBase() {
+    const ok = await this.confirm({
+      title: 'Очистить базу знаний?',
+      body: 'Будут удалены все документы, фрагменты и загруженные файлы. Это действие нельзя отменить.',
+      confirmLabel: 'Очистить базу',
+      danger: true,
+    });
+    if (!ok) return;
+    const res = await fetch('/api/documents', { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(typeof data.detail === 'string' ? data.detail : 'Не удалось очистить базу');
+      return;
+    }
+    const status = document.getElementById('job-status');
+    if (status) {
+      status.textContent = `База очищена · документов ${data.deleted_documents ?? 0} · фрагментов ${data.deleted_chunks ?? 0}`;
+    }
+    this._docsPage = 1;
+    await this.loadDocuments(1, this._docsPageSize);
+  },
+
+  async clearJournal() {
+    const ok = await this.confirm({
+      title: 'Очистить журнал?',
+      body: 'Будут удалены все запуски агента и записи поиска/RAG. Это действие нельзя отменить.',
+      confirmLabel: 'Очистить журнал',
+      danger: true,
+    });
+    if (!ok) return;
+    const res = await fetch('/api/pipeline-logs', { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(typeof data.detail === 'string' ? data.detail : 'Не удалось очистить журнал');
+      return false;
+    }
+    return data;
+  },
+
+  /** Promise-based confirm modal. Resolves true/false. */
+  confirm({ title, body, confirmLabel = 'Подтвердить', cancelLabel = 'Отмена', danger = false } = {}) {
+    return new Promise((resolve) => {
+      let root = document.getElementById('prism-modal');
+      if (!root) {
+        root = document.createElement('div');
+        root.id = 'prism-modal';
+        root.className = 'modal-root hidden';
+        root.innerHTML = `
+          <div class="modal-backdrop" data-modal-cancel></div>
+          <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="prism-modal-title">
+            <h2 id="prism-modal-title" class="modal-title"></h2>
+            <p class="modal-body"></p>
+            <div class="modal-actions">
+              <button type="button" class="btn btn-ghost" data-modal-cancel></button>
+              <button type="button" class="btn" data-modal-confirm></button>
+            </div>
+          </div>`;
+        document.body.appendChild(root);
+      }
+
+      const titleEl = root.querySelector('.modal-title');
+      const bodyEl = root.querySelector('.modal-body');
+      const cancelBtn = root.querySelector('[data-modal-cancel].btn');
+      const confirmBtn = root.querySelector('[data-modal-confirm]');
+      titleEl.textContent = title || 'Подтверждение';
+      bodyEl.textContent = body || '';
+      cancelBtn.textContent = cancelLabel;
+      confirmBtn.textContent = confirmLabel;
+      confirmBtn.className = danger ? 'btn btn-danger' : 'btn';
+
+      const close = (value) => {
+        root.classList.add('hidden');
+        document.removeEventListener('keydown', onKey);
+        root.removeEventListener('click', onClick);
+        resolve(value);
+      };
+      const onKey = (e) => {
+        if (e.key === 'Escape') close(false);
+      };
+      const onClick = (e) => {
+        if (e.target.closest('[data-modal-confirm]')) close(true);
+        else if (e.target.closest('[data-modal-cancel]')) close(false);
+      };
+
+      root.addEventListener('click', onClick);
+      document.addEventListener('keydown', onKey);
+      root.classList.remove('hidden');
+      confirmBtn.focus();
+    });
   },
 
   async saveSettings(form) {
@@ -580,14 +769,25 @@ const PrismApp = {
     body.chunk_size = Number(body.chunk_size);
     body.chunk_overlap = Number(body.chunk_overlap);
     body.top_k = Number(body.top_k);
+    body.rerank_candidates = Number(body.rerank_candidates || 20);
+    body.rerank_enabled = !!form.querySelector('#rerank_enabled')?.checked;
     const res = await fetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
     const data = await res.json();
-    document.getElementById('settings-msg').textContent = res.ok
-      ? 'Сохранено'
-      : (data.detail || 'Ошибка');
+    const msg = document.getElementById('settings-msg');
+    if (!msg) return;
+    if (!res.ok) {
+      msg.textContent = data.detail || 'Ошибка';
+      return;
+    }
+    const emb = body.embedding_model || '';
+    msg.textContent = (emb === 'hash' || emb === 'hash-embedder')
+      ? 'Сохранено. Hash активен — для нормального поиска верните MiniLM и переиндексируйте базу.'
+      : (body.rerank_enabled
+        ? 'Сохранено. Реранк включён для чата/поиска (оценка по-прежнему из YAML).'
+        : 'Сохранено');
   },
 };

@@ -6,6 +6,7 @@ Baseline = C2 + multilingual MiniLM + dense (configs/rag/baseline.yaml).
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -94,12 +95,23 @@ def _percentile(xs: list[float], p: float) -> float:
     return float(ys[idx])
 
 
+ProgressCb = Callable[[dict[str, Any]], None]
+
+
 def run_eval(
     eval_config_path: str,
     *,
     skip_generation: bool = False,
     use_llm_judge: bool = True,
+    on_progress: ProgressCb | None = None,
 ) -> dict[str, Any]:
+    def _progress(payload: dict[str, Any]) -> None:
+        if on_progress is not None:
+            try:
+                on_progress(payload)
+            except Exception:
+                pass
+
     cfg = _load_yaml(eval_config_path)
     rag_path = cfg.get("config") or "configs/rag/baseline.yaml"
     rag = _load_yaml(rag_path)
@@ -107,6 +119,7 @@ def run_eval(
 
     dataset_path = cfg.get("dataset") or "data/golden/dev.jsonl"
     max_q = cfg.get("max_questions")
+    _progress({"step": "load_dataset", "detail": str(dataset_path), "progress": 1})
     questions = load_golden(dataset_path, max_questions=max_q)
 
     gen_enabled = bool(cfg.get("generation", True)) and not skip_generation
@@ -117,6 +130,15 @@ def run_eval(
     db = get_session_factory()()
 
     run_id = new_run_id(cfg.get("name") or "eval")
+    _progress(
+        {
+            "step": "started",
+            "run_id": run_id,
+            "n_questions": len(questions),
+            "generation": gen_enabled,
+            "progress": 2,
+        }
+    )
     per_q: list[dict] = []
 
     # metric accumulators
@@ -128,9 +150,21 @@ def run_eval(
 
     # Eval retrieve width: need @10
     eval_top_k = max(10, int(settings.top_k))
+    n_total = len(questions) or 1
 
     try:
-        for q in questions:
+        for i, q in enumerate(questions, start=1):
+            _progress(
+                {
+                    "step": "question",
+                    "run_id": run_id,
+                    "i": i,
+                    "n": len(questions),
+                    "question_id": q.id,
+                    "question": (q.question or "")[:120],
+                    "progress": min(95, int(3 + 90 * i / n_total)),
+                }
+            )
             row = _eval_one(
                 db,
                 q,
@@ -231,8 +265,17 @@ def run_eval(
             ),
         }
 
+    _progress({"step": "write_report", "run_id": run_id, "progress": 96})
     out_dir = write_report(run_id, summary, per_q)
     summary["report_dir"] = str(out_dir)
+    try:
+        from prism.eval.pdf_report import write_pdf_report
+
+        pdf_path = write_pdf_report(out_dir, summary, per_q)
+        summary["pdf_path"] = str(pdf_path) if pdf_path else None
+    except Exception:
+        summary["pdf_path"] = None
+    _progress({"step": "done", "run_id": run_id, "progress": 100})
     return summary
 
 

@@ -2,10 +2,14 @@
 {% block title %}Одобрения · Prism{% endblock %}
 {% block content %}
 <section class="panel">
-  <h1>Очередь одобрений</h1>
-  <p class="lede muted">Действия ActionGate в режиме «спросить» / «по запросу». TTL из настроек (по умолчанию 300 с).</p>
-  <button type="button" id="btn-refresh" class="btn">Обновить</button>
-  <div id="list" class="stack" style="margin-top:1rem"></div>
+  <div class="panel-head">
+    <div class="panel-title-row">
+      <h1>Очередь одобрений</h1>
+      <button type="button" id="btn-refresh" class="btn">Обновить</button>
+    </div>
+    <p class="page-intro">Здесь ждут действия, которые нельзя выполнить молча — например выход в сеть. Одобрите или отклоните; без ответа запрос сам протухнет через несколько минут.</p>
+  </div>
+  <div id="list" class="item-list"></div>
 </section>
 {% endblock %}
 {% block scripts %}

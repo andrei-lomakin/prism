@@ -1,44 +1,120 @@
 {% extends "base.html" %}
-{% block title %}Трасса · Prism{% endblock %}
+{% block title %}Журнал · Prism{% endblock %}
 {% block content %}
 <section class="panel">
-  <h1>Трасса запуска</h1>
-  <p class="lede muted">Шаги агента из БД и/или spans из буфера трассировки.</p>
-  <form id="trace-form" class="row stack">
-    <label>ID запуска <input id="run_id" value="{{ run_id }}" placeholder="42" /></label>
-    <label>ID трассы <input id="trace_id" value="{{ trace_id }}" placeholder="hex" /></label>
-    <button type="submit" class="btn">Загрузить</button>
-  </form>
-  <pre id="trace-out" class="answer">Укажите ID запуска или трассы.</pre>
+  <div class="panel-head">
+    <div class="panel-title-row">
+      <h1>Журнал запусков</h1>
+      <button type="button" class="btn btn-danger-ghost" id="clear-journal">Очистить журнал</button>
+    </div>
+    <p class="page-intro">Все недавние ответы и агентные прогоны в одном списке. Откройте запись — полный лог на отдельной странице.</p>
+  </div>
+
+  <div id="log-list" class="log-list" aria-live="polite"></div>
+  <div id="log-pager" class="log-pager hidden">
+    <button type="button" class="btn btn-ghost" id="log-prev">Назад</button>
+    <span id="log-page-label" class="muted"></span>
+    <button type="button" class="btn btn-ghost" id="log-next">Вперёд</button>
+  </div>
 </section>
 {% endblock %}
 {% block scripts %}
 <script>
-  document.getElementById('trace-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const runId = document.getElementById('run_id').value.trim();
-    const traceId = document.getElementById('trace_id').value.trim();
-    const out = document.getElementById('trace-out');
-    out.textContent = 'Загрузка…';
+(() => {
+  const PAGE_SIZE = 15;
+  let page = 1;
+  let pages = 1;
+
+  const listEl = document.getElementById('log-list');
+  const pagerEl = document.getElementById('log-pager');
+  const pageLabel = document.getElementById('log-page-label');
+
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+
+  const stateRu = (s) => ({
+    completed: 'готово',
+    failed: 'ошибка',
+    running: 'идёт',
+    queued: 'в очереди',
+    planning: 'план',
+    awaiting_approval: 'ждёт одобрения',
+    awaiting_subagents: 'ждёт субагентов',
+    cancelled: 'отменено',
+    timed_out: 'таймаут',
+    ok: 'ок',
+    error: 'ошибка',
+  }[s] || s || '—');
+
+  const fmtWhen = (iso) => {
+    if (!iso) return '';
     try {
-      let data = {};
-      if (runId) {
-        const r = await fetch('/api/runs/' + encodeURIComponent(runId));
-        if (!r.ok) throw new Error(await r.text());
-        data.run = await r.json();
+      return new Date(iso).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'medium' });
+    } catch { return iso; }
+  };
+
+  const hrefFor = (kind, id) =>
+    kind === 'run'
+      ? `/trace/run/${encodeURIComponent(id)}`
+      : `/trace/log/${encodeURIComponent(id)}`;
+
+  async function loadList() {
+    listEl.innerHTML = '<p class="muted">Загрузка журнала…</p>';
+    try {
+      const res = await fetch(`/api/pipeline-logs?page=${page}&page_size=${PAGE_SIZE}`);
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      pages = data.pages || 1;
+      page = data.page || 1;
+      const items = data.items || [];
+      if (!items.length) {
+        listEl.innerHTML = '<p class="muted">Пока пусто — задайте вопрос на вкладке «Поиск».</p>';
+        pagerEl.classList.add('hidden');
+        return;
       }
-      if (traceId) {
-        const t = await fetch('/api/traces/' + encodeURIComponent(traceId));
-        if (!t.ok) throw new Error(await t.text());
-        data.trace = await t.json();
-      } else if (data.run) {
-        const t = await fetch('/api/traces/' + encodeURIComponent(String(data.run.id)));
-        if (t.ok) data.trace = await t.json();
-      }
-      out.textContent = JSON.stringify(data, null, 2);
+      listEl.innerHTML = items.map((it) => `
+        <a class="log-item" href="${hrefFor(it.kind, it.id)}">
+          <div class="log-item-main">
+            <div class="log-item-title">${esc(it.title || it.id)}</div>
+            <div class="log-item-sub muted">${esc(it.subtitle || '')}</div>
+          </div>
+          <div class="log-item-side">
+            <span class="badge ${it.state === 'completed' || it.state === 'ok' ? 'ok' : (it.state === 'failed' || it.state === 'error' ? 'err' : '')}">${esc(stateRu(it.state))}</span>
+            <span class="muted log-item-when">${esc(fmtWhen(it.created_at))}</span>
+          </div>
+        </a>
+      `).join('');
+      pagerEl.classList.toggle('hidden', pages <= 1);
+      pageLabel.textContent = `стр. ${page} из ${pages} · всего ${data.total}`;
+      document.getElementById('log-prev').disabled = page <= 1;
+      document.getElementById('log-next').disabled = page >= pages;
     } catch (err) {
-      out.textContent = String(err);
+      listEl.innerHTML = `<p class="muted">${esc(String(err))}</p>`;
+    }
+  }
+
+  document.getElementById('log-prev').addEventListener('click', () => {
+    if (page > 1) { page -= 1; loadList(); }
+  });
+  document.getElementById('log-next').addEventListener('click', () => {
+    if (page < pages) { page += 1; loadList(); }
+  });
+  document.getElementById('clear-journal').addEventListener('click', async () => {
+    const btn = document.getElementById('clear-journal');
+    btn.disabled = true;
+    try {
+      const data = await PrismApp.clearJournal();
+      if (data) {
+        page = 1;
+        await loadList();
+      }
+    } finally {
+      btn.disabled = false;
     }
   });
+
+  loadList();
+})();
 </script>
 {% endblock %}

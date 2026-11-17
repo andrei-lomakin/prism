@@ -14,6 +14,10 @@ class SettingsOut(BaseModel):
     chunk_overlap: int
     top_k: int
     retrieval_mode: str
+    vector_search: Literal["exact", "hnsw"] = "exact"
+    hnsw_ef_search: int = 40
+    rerank_enabled: bool = False
+    rerank_candidates: int = 20
     llm_provider: str
     llm_model: str
     ollama_base_url: str
@@ -27,6 +31,8 @@ class SettingsUpdate(BaseModel):
     chunk_overlap: int | None = Field(default=None, ge=0, le=1024)
     top_k: int | None = Field(default=None, ge=1, le=50)
     retrieval_mode: Literal["dense", "lexical", "hybrid"] | None = None
+    rerank_enabled: bool | None = None
+    rerank_candidates: int | None = Field(default=None, ge=5, le=100)
     llm_provider: Literal["ollama", "openai_compatible"] | None = None
     llm_model: str | None = None
     ollama_base_url: str | None = None

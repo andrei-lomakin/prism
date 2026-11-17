@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}Запись журнала · Prism{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="log-detail-head">
+    <div class="log-detail-title-row">
+      <a class="btn btn-ghost btn-sm back-link" href="/trace">← К журналу</a>
+      <h1 id="log-detail-title">Загрузка…</h1>
+    </div>
+    <p id="log-detail-meta" class="muted"></p>
+  </div>
+  <div id="log-detail-body" class="log-detail-body"></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const kind = {{ kind|tojson }};
+  const id = {{ entry_id|tojson }};
+
+  const detailTitle = document.getElementById('log-detail-title');
+  const detailMeta = document.getElementById('log-detail-meta');
+  const detailBody = document.getElementById('log-detail-body');
+
+  const esc = (s) => String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+  function inlineMd(s) {
+    let t = esc(s);
+    t = t.replace(/`([^`]+)`/g, '<code>$1</code>');
+    t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    t = t.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+    t = t.replace(/(^|[^*\w])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+    t = t.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,
+      '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    t = t.replace(/\[(\d+)\]/g, '<span class="cite-ref">[$1]</span>');
+    return t;
+  }
+
+  function renderMarkdown(src) {
+    if (window.PrismApp && typeof PrismApp._renderMarkdown === 'function') {
+      return PrismApp._renderMarkdown(src);
+    }
+    const parts = String(src ?? '').replace(/\r\n/g, '\n').split(/\n{2,}/);
+    return parts.map((part) => {
+      const trimmed = part.trim();
+      if (!trimmed) return '';
+      return `<p>${trimmed.split('\n').map((l) => inlineMd(l)).join('<br>')}</p>`;
+    }).join('\n');
+  }
+
+  const md = (s) => renderMarkdown(s);
+
+  const stateRu = (s) => ({
+    completed: 'готово',
+    failed: 'ошибка',
+    running: 'идёт',
+    queued: 'в очереди',
+    planning: 'план',
+    awaiting_approval: 'ждёт одобрения',
+    awaiting_subagents: 'ждёт субагентов',
+    cancelled: 'отменено',
+    timed_out: 'таймаут',
+    ok: 'ок',
+    error: 'ошибка',
+  }[s] || s || '—');
+
+  function renderSteps(steps) {
+    if (!steps || !steps.length) return '<p class="muted">Шагов нет.</p>';
+    return `<ol class="log-steps">${steps.map((s) => {
+      const kind = s.kind || 'шаг';
+      const tool = s.input?.tool || s.input?.title || '';
+      const out = s.output;
+      let detail = '';
+      if (typeof out === 'string') detail = out.slice(0, 240);
+      else if (out && typeof out === 'object') {
+        if (out.error) detail = String(out.error);
+        else if (out.hits) detail = `найдено: ${out.hits.length ?? out.n ?? '—'}`;
+        else detail = Object.keys(out).slice(0, 6).join(', ');
+      }
+      const ms = s.latency_ms != null ? `${s.latency_ms} мс` : '';
+      return `<li>
+        <div class="log-step-title"><b>#${s.n}</b> ${esc(kind)}${tool ? ' · ' + esc(tool) : ''}</div>
+        <div class="muted">${esc(detail)}${ms ? ' · ' + esc(ms) : ''}</div>
+      </li>`;
+    }).join('')}</ol>`;
+  }
+
+  function renderSpans(spans) {
+    if (!spans || !spans.length) return '';
+    return `<h2 class="log-section-title">Технические spans</h2>
+      <ol class="log-steps">${spans.map((s) => `
+        <li>
+          <div class="log-step-title">${esc(s.name)} <span class="badge ${s.status === 'ok' ? 'ok' : 'err'}">${esc(s.status)}</span></div>
+          <div class="muted">${s.duration_ms != null ? esc(Math.round(s.duration_ms) + ' мс') : ''}${s.error ? ' · ' + esc(s.error) : ''}</div>
+        </li>
+      `).join('')}</ol>`;
+  }
+
+  async function load() {
+    try {
+      if (kind === 'run') {
+        const r = await fetch('/api/runs/' + encodeURIComponent(id));
+        if (!r.ok) throw new Error(await r.text());
+        const run = await r.json();
+        let spans = [];
+        const t = await fetch('/api/traces/' + encodeURIComponent(id));
+        if (t.ok) spans = (await t.json()).spans || [];
+        detailTitle.textContent = run.objective || `Запуск #${run.id}`;
+        detailMeta.textContent = `#${run.id} · ${stateRu(run.state)} · роль ${run.role || '—'}`;
+        const answer = run.result?.answer || run.result?.text || '';
+        detailBody.innerHTML =
+          (answer ? `<div class="answer md-body">${md(answer)}</div>` : '') +
+          `<h2 class="log-section-title">Шаги</h2>` +
+          renderSteps(run.steps) +
+          renderSpans(spans) +
+          `<h2 class="log-section-title">Сырой JSON</h2>` +
+          `<pre class="answer log-json">${esc(JSON.stringify(run, null, 2))}</pre>`;
+      } else {
+        const t = await fetch('/api/traces/' + encodeURIComponent(id));
+        if (!t.ok) throw new Error(await t.text());
+        const tr = await t.json();
+        detailTitle.textContent = tr.spans?.[0]?.name || `Запись ${id}`;
+        detailMeta.textContent = `id ${id} · spans: ${tr.n ?? (tr.spans || []).length}`;
+        detailBody.innerHTML =
+          (renderSpans(tr.spans) || '<p class="muted">Spans пусты (буфер мог уже очиститься).</p>') +
+          `<h2 class="log-section-title">Сырой JSON</h2>` +
+          `<pre class="answer log-json">${esc(JSON.stringify(tr, null, 2))}</pre>`;
+      }
+    } catch (err) {
+      detailTitle.textContent = 'Не удалось открыть';
+      detailBody.innerHTML = `<p class="muted">${esc(String(err))}</p>`;
+    }
+  }
+
+  load();
+})();
+</script>
+{% endblock %}

@@ -9,73 +9,57 @@
     <div class="controls-grid">
       <div class="field">
         <div class="field-head">
-          <span class="field-title">Сколько фрагментов</span>
-          <button type="button" class="tip" aria-label="Подсказка: число фрагментов" data-tip>
+          <span class="field-title">Что сделать</span>
+          <button type="button" class="tip" aria-label="Подсказка: действие" data-tip>
             ?
             <span class="tip-pop" role="tooltip">
-              <strong>Число фрагментов (top_k)</strong> — сколько кусков документов попадёт
-              в контекст модели или в список «Только поиск».
+              Один выбор — одно действие по кнопке ниже:
               <ul>
-                <li><b>3–5</b> — обычный факт</li>
-                <li><b>8–12</b> — сравнение / несколько документов</li>
-                <li>Слишком много → шум и лишние токены</li>
+                <li><b>Ответить</b> — найти фрагменты и сразу сгенерировать ответ</li>
+                <li><b>Агент</b> — то же + план, инструменты, проверки</li>
+                <li><b>Найти</b> — только показать найденные фрагменты, без модели</li>
               </ul>
             </span>
           </button>
         </div>
-        <div class="field-body field-number">
-          <input type="number" id="top_k" value="{{ default_top_k }}" min="1" max="20" />
-          <span class="field-suffix">макс. 20</span>
-        </div>
-      </div>
-
-      <div class="field">
-        <div class="field-head">
-          <span class="field-title">Режим ответа</span>
-          <button type="button" class="tip" aria-label="Подсказка: режим" data-tip>
-            ?
-            <span class="tip-pop" role="tooltip">
-              Как система отвечает:
-              <ul>
-                <li><b>Быстрый RAG</b> — поиск → один ответ с цитатами</li>
-                <li><b>Агент</b> — план, инструменты, проверка через ActionGate</li>
-              </ul>
-            </span>
-          </button>
-        </div>
-        <div class="seg" role="radiogroup" aria-label="Режим ответа">
+        <div class="seg seg-wrap" role="radiogroup" aria-label="Что сделать">
           <label class="seg-item">
             <input type="radio" name="mode" value="rag" checked />
-            <span>Быстрый RAG</span>
+            <span>Ответить</span>
           </label>
           <label class="seg-item">
             <input type="radio" name="mode" value="agent" />
             <span>Агент</span>
           </label>
+          <label class="seg-item">
+            <input type="radio" name="mode" value="search" />
+            <span>Найти</span>
+          </label>
         </div>
         <select id="mode" class="sr-only" tabindex="-1" aria-hidden="true">
-          <option value="rag" selected>быстрый RAG</option>
+          <option value="rag" selected>ответить</option>
           <option value="agent">агент</option>
+          <option value="search">найти</option>
         </select>
       </div>
 
       <div class="field">
         <div class="field-head">
-          <span class="field-title">Пространство</span>
+          <span class="field-title">Где искать</span>
           <button type="button" class="tip" aria-label="Подсказка: пространство" data-tip>
             ?
             <span class="tip-pop" role="tooltip">
-              Слой документов:
+              Какой слой документов брать:
               <ul>
-                <li><b>Все</b> — без фильтра (личный важнее проектного и общего)</li>
-                <li><b>Личное</b> — personal</li>
-                <li><b>Проект</b> — project</li>
-                <li><b>Общее</b> — shared (сюда попадает демо-корпус)</li>
+                <li><b>Все</b> — без фильтра (личное чуть важнее остального)</li>
+                <li><b>Личное / Проект / Общее</b> — только этот слой</li>
+                <li>Демо-корпус лежит в <b>Общем</b></li>
               </ul>
+              Число фрагментов задаётся в Настройках.
             </span>
           </button>
         </div>
-        <div class="seg seg-wrap" role="radiogroup" aria-label="Пространство">
+        <div class="seg seg-wrap" role="radiogroup" aria-label="Где искать">
           <label class="seg-item">
             <input type="radio" name="space" value="all" />
             <span>Все</span>
@@ -101,33 +85,29 @@
         </select>
       </div>
 
-      <div class="field field-switch">
-        <div class="field-head">
-          <span class="field-title">Потоковый вывод</span>
-          <button type="button" class="tip" aria-label="Подсказка: поток" data-tip>
-            ?
-            <span class="tip-pop tip-pop-end" role="tooltip">
-              Поток <b>событий</b> (SSE), не live-токены LLM:
-              <ul>
-                <li><b>Вкл</b> — шаги агента + нарезка готового ответа</li>
-                <li><b>Выкл</b> — один ответ в конце</li>
-              </ul>
-              На качество ответа не влияет.
-            </span>
-          </button>
-        </div>
-        <label class="switch">
-          <input type="checkbox" id="stream" checked />
-          <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
-          <span class="switch-text">вкл</span>
-        </label>
-      </div>
     </div>
 
     <div class="actions">
-      <button type="submit" class="btn" id="btn-ask">Спросить</button>
-      <button type="button" id="btn-search" class="btn btn-ghost">Только поиск</button>
-      <p id="flow-hint" class="flow-hint muted">маршрут: общее · RAG · поток · фрагментов {{ default_top_k }}</p>
+      <p id="flow-hint" class="flow-hint muted">Общее · ответ · по шагам</p>
+      <div class="actions-stream" id="stream-wrap">
+        <label class="switch" for="stream">
+          <input type="checkbox" id="stream" checked />
+          <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+          <span class="switch-text">По шагам</span>
+        </label>
+        <button type="button" class="tip tip-tight" aria-label="Подсказка: показ прогресса" data-tip>
+          ?
+          <span class="tip-pop tip-pop-end" role="tooltip">
+            Как показывать работу на экране:
+            <ul>
+              <li><b>По шагам</b> — видно поиск, генерацию и промежуточные этапы</li>
+              <li><b>Только итог</b> — один готовый результат в конце</li>
+            </ul>
+            На качество ответа не влияет. В режиме «Найти» не используется.
+          </span>
+        </button>
+      </div>
+      <button type="submit" class="btn" id="btn-ask">Ответить</button>
     </div>
   </form>
 
@@ -138,7 +118,7 @@
     </div>
     <ol id="run-steps" class="run-steps"></ol>
     <div id="answer" class="answer hidden"></div>
-    <div id="trace-link" class="muted hidden"></div>
+    <div id="trace-link" class="trace-bar hidden"></div>
   </div>
   <div id="sources" class="sources"></div>
 </section>
@@ -154,28 +134,45 @@
 {% endblock %}
 {% block scripts %}
 <script>
-  const SPACE_RU = { all: 'все', personal: 'личное', project: 'проект', shared: 'общее' };
+  const SPACE_RU = { all: 'все слои', personal: 'личное', project: 'проект', shared: 'общее' };
+  const MODE_BTN = { rag: 'Ответить', agent: 'Запустить агента', search: 'Найти фрагменты' };
+
   function syncHidden(name, selectId) {
     const checked = document.querySelector(`input[name="${name}"]:checked`);
     const sel = document.getElementById(selectId);
     if (checked && sel) sel.value = checked.value;
   }
+
   function refreshHint() {
     syncHidden('mode', 'mode');
     syncHidden('space', 'space');
-    const k = document.getElementById('top_k').value;
     const mode = document.getElementById('mode').value;
     const space = document.getElementById('space').value;
     const streamOn = document.getElementById('stream').checked;
+    const streamWrap = document.getElementById('stream-wrap');
     const streamLabel = document.querySelector('.switch-text');
-    if (streamLabel) streamLabel.textContent = streamOn ? 'вкл' : 'выкл';
-    document.getElementById('flow-hint').textContent =
-      `маршрут: ${SPACE_RU[space] || space} · ${mode === 'agent' ? 'агент' : 'RAG'} · ${streamOn ? 'SSE-события' : 'одним ответом'} · фрагментов ${k}`;
+    const askBtn = document.getElementById('btn-ask');
+    if (streamLabel) streamLabel.textContent = streamOn ? 'По шагам' : 'Только итог';
+    if (streamWrap) streamWrap.classList.toggle('is-disabled', mode === 'search');
+    if (askBtn) askBtn.textContent = MODE_BTN[mode] || 'Запустить';
+
+    let action;
+    if (mode === 'search') action = 'только фрагменты';
+    else if (mode === 'agent') action = 'агент';
+    else action = 'ответ';
+
+    const progress = mode === 'search'
+      ? null
+      : (streamOn ? 'по шагам' : 'только итог');
+
+    document.getElementById('flow-hint').textContent = progress
+      ? `${SPACE_RU[space] || space} · ${action} · ${progress}`
+      : `${SPACE_RU[space] || space} · ${action}`;
   }
+
   document.querySelectorAll('input[name="mode"], input[name="space"]').forEach((el) => {
     el.addEventListener('change', refreshHint);
   });
-  document.getElementById('top_k').addEventListener('change', refreshHint);
   document.getElementById('stream').addEventListener('change', refreshHint);
   document.querySelectorAll('[data-tip]').forEach((btn) => {
     btn.addEventListener('click', (e) => {
@@ -191,18 +188,19 @@
     }
   });
   refreshHint();
+
   document.getElementById('chat-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     syncHidden('mode', 'mode');
     syncHidden('space', 'space');
+    const mode = document.getElementById('mode').value;
+    if (mode === 'search') {
+      await PrismApp.searchOnly();
+      return;
+    }
     const stream = document.getElementById('stream')?.checked;
     if (stream) await PrismApp.chatStream();
     else await PrismApp.chat();
-  });
-  document.getElementById('btn-search').addEventListener('click', () => {
-    syncHidden('mode', 'mode');
-    syncHidden('space', 'space');
-    PrismApp.searchOnly();
   });
   document.getElementById('cite-drawer-close')?.addEventListener('click', () => PrismApp.closeCitation());
   document.addEventListener('keydown', (e) => {

@@ -4,22 +4,19 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{% block title %}Prism{% endblock %}</title>
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=20261117s" />
 </head>
 <body>
   <div class="page">
     <header class="topbar">
       <div class="brand">
         <span class="brand-mark">P</span>
-        <div>
-          <div class="brand-name">Prism</div>
-          <div class="brand-sub">RAG + мультиагентный ассистент</div>
-        </div>
+        <div class="brand-name">Prism</div>
       </div>
       <nav class="tabs">
         <a href="/search" class="tab {% if active == 'search' %}active{% endif %}">Поиск</a>
         <a href="/upload" class="tab {% if active == 'upload' %}active{% endif %}">База</a>
-        <a href="/trace" class="tab {% if active == 'trace' %}active{% endif %}">Трасса</a>
+        <a href="/trace" class="tab {% if active == 'trace' %}active{% endif %}">Журнал</a>
         <a href="/approvals" class="tab {% if active == 'approvals' %}active{% endif %}">Одобрения</a>
         <a href="/eval" class="tab {% if active == 'eval' %}active{% endif %}">Оценка</a>
         <a href="/settings" class="tab {% if active == 'settings' %}active{% endif %}">Настройки</a>
@@ -29,7 +26,7 @@
       {% block content %}{% endblock %}
     </main>
   </div>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=20261117s"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -17,6 +17,8 @@ def _base_out(s: Settings) -> SettingsOut:
         chunk_overlap=s.chunk_overlap,
         top_k=s.top_k,
         retrieval_mode=s.retrieval_mode,
+        rerank_enabled=bool(s.rerank_enabled),
+        rerank_candidates=int(s.rerank_candidates),
         llm_provider=s.llm_provider,
         llm_model=s.llm_model,
         ollama_base_url=s.ollama_base_url,
@@ -37,6 +39,7 @@ def get_effective_settings(db: Session) -> SettingsOut:
 def save_settings(db: Session, update: SettingsUpdate) -> SettingsOut:
     row = db.get(AppSetting, 1)
     current = get_effective_settings(db).model_dump()
+    prev_emb = current.get("embedding_model")
     patch = update.model_dump(exclude_unset=True)
     current.update(patch)
     if row is None:
@@ -45,6 +48,10 @@ def save_settings(db: Session, update: SettingsUpdate) -> SettingsOut:
     else:
         row.payload = current
     db.commit()
+    if patch.get("embedding_model") and patch["embedding_model"] != prev_emb:
+        from prism.rag.embeddings.base import clear_embedder_cache
+
+        clear_embedder_cache()
     return get_effective_settings(db)
 
 
@@ -60,6 +67,8 @@ def settings_as_config(db: Session) -> Settings:
             "chunk_overlap": out.chunk_overlap,
             "top_k": out.top_k,
             "retrieval_mode": out.retrieval_mode,
+            "rerank_enabled": bool(out.rerank_enabled),
+            "rerank_candidates": int(out.rerank_candidates),
             "llm_provider": out.llm_provider,
             "llm_model": out.llm_model,
             "ollama_base_url": out.ollama_base_url,

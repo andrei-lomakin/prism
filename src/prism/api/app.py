@@ -66,18 +66,22 @@ def root() -> RedirectResponse:
 
 
 @app.get("/search", response_class=HTMLResponse)
-def page_search(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
-    s = get_effective_settings(db)
-    return templates.TemplateResponse(
-        request,
-        "search.html",
-        {"active": "search", "default_top_k": s.top_k},
-    )
+def page_search(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(request, "search.html", {"active": "search"})
 
 
 @app.get("/upload", response_class=HTMLResponse)
 def page_upload(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "upload.html", {"active": "upload"})
+
+
+@app.get("/upload/{document_id}", response_class=HTMLResponse)
+def page_document(request: Request, document_id: int) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "document_detail.html",
+        {"active": "upload", "document_id": document_id},
+    )
 
 
 @app.get("/settings", response_class=HTMLResponse)
@@ -93,10 +97,29 @@ def page_settings(request: Request, db: Session = Depends(get_db)) -> HTMLRespon
 def page_trace(
     request: Request, run_id: str | None = None, trace_id: str | None = None
 ) -> HTMLResponse:
+    # Legacy query links from search → dedicated detail pages
+    if run_id:
+        return RedirectResponse(url=f"/trace/run/{run_id}", status_code=302)
+    if trace_id:
+        return RedirectResponse(url=f"/trace/log/{trace_id}", status_code=302)
+    return templates.TemplateResponse(request, "trace.html", {"active": "trace"})
+
+
+@app.get("/trace/run/{run_id}", response_class=HTMLResponse)
+def page_trace_run(request: Request, run_id: str) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
-        "trace.html",
-        {"active": "trace", "run_id": run_id or "", "trace_id": trace_id or ""},
+        "trace_detail.html",
+        {"active": "trace", "kind": "run", "entry_id": run_id},
+    )
+
+
+@app.get("/trace/log/{trace_id}", response_class=HTMLResponse)
+def page_trace_log(request: Request, trace_id: str) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "trace_detail.html",
+        {"active": "trace", "kind": "trace", "entry_id": trace_id},
     )
 
 
@@ -108,3 +131,12 @@ def page_approvals(request: Request) -> HTMLResponse:
 @app.get("/eval", response_class=HTMLResponse)
 def page_eval(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "eval.html", {"active": "eval"})
+
+
+@app.get("/eval/run/{run_id}", response_class=HTMLResponse)
+def page_eval_run(request: Request, run_id: str) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "eval_detail.html",
+        {"active": "eval", "run_id": run_id},
+    )

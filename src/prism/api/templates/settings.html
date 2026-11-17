@@ -2,8 +2,9 @@
 {% block title %}Настройки · Prism{% endblock %}
 {% block content %}
 <section class="panel">
-  <h1>Настройки RAG / LLM</h1>
-  <p class="lede muted">Параметры по умолчанию для поиска и генерации. Сохраняются в БД поверх <code>.env</code>.</p>
+  <div class="panel-head">
+    <h1>Настройки RAG / LLM</h1>
+  </div>
   <form id="settings-form" class="stack">
     <div class="field">
       <div class="field-head">
@@ -20,7 +21,9 @@
       {% set emb = settings.embedding_model %}
       {% set emb_known = [
         'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
-        'sentence-transformers/all-MiniLM-L6-v2'
+        'sentence-transformers/all-MiniLM-L6-v2',
+        'hash',
+        'hash-embedder'
       ] %}
       <select name="embedding_model" id="embedding_model">
         {% if emb not in emb_known %}
@@ -28,13 +31,20 @@
         {% endif %}
         <option value="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
           {% if emb == 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2' %}selected{% endif %}>
-          MiniLM-L12 (русский и английский)
+          MiniLM-L12 — боевой (русский и английский)
         </option>
         <option value="sentence-transformers/all-MiniLM-L6-v2"
           {% if emb == 'sentence-transformers/all-MiniLM-L6-v2' %}selected{% endif %}>
-          MiniLM-L6 (английский)
+          MiniLM-L6 — боевой (английский)
+        </option>
+        <option value="hash"
+          {% if emb in ('hash', 'hash-embedder') %}selected{% endif %}>
+          HashEmbedder — тест/CI (без нейросети)
         </option>
       </select>
+      <p id="emb-warn" class="muted settings-warn hidden">
+        Смена эмбеддера требует полной переиндексации базы. Hash — только для отладки: качество поиска нерепрезентативно.
+      </p>
     </div>
 
     <div class="field">
@@ -84,6 +94,35 @@
       </select>
     </div>
 
+    <div class="field">
+      <div class="field-head">
+        <span class="field-title">Реранжирование</span>
+        <button type="button" class="tip" aria-label="Подсказка: реранк" data-tip>
+          ?
+          <span class="tip-pop" role="tooltip">
+            После первичного поиска cross-encoder ещё раз переупорядочивает кандидатов.
+            Обычно чуть точнее, но медленнее (нужна модель реранкера).
+            На прогоны в разделе «Оценка» не влияет — там свой YAML.
+          </span>
+        </button>
+      </div>
+      <div class="settings-rerank-row">
+        <div class="actions-stream" id="rerank-wrap">
+          <label class="switch" for="rerank_enabled">
+            <input type="checkbox" id="rerank_enabled" {% if settings.rerank_enabled %}checked{% endif %} />
+            <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+            <span class="switch-text" id="rerank-label">{% if settings.rerank_enabled %}вкл{% else %}выкл{% endif %}</span>
+          </label>
+        </div>
+        <label class="settings-candidates">
+          Кандидатов в пул
+          <input type="number" name="rerank_candidates" id="rerank_candidates"
+            value="{{ settings.rerank_candidates }}" min="5" max="100"
+            {% if not settings.rerank_enabled %}disabled{% endif %} />
+        </label>
+      </div>
+    </div>
+
     <label>Адрес Ollama
       <input name="ollama_base_url" id="ollama_base_url" value="{{ settings.ollama_base_url }}" />
     </label>
@@ -109,10 +148,6 @@
     <button type="submit" class="btn">Сохранить</button>
   </form>
   <pre id="settings-msg" class="muted"></pre>
-  <p class="muted" style="margin-top:1.5rem">
-    Авторизация: если в <code>.env</code> задан <code>AUTH_PASSWORD</code>, браузер запросит логин/пароль
-    для API. <code>/api/health</code> остаётся открытым.
-  </p>
 </section>
 {% endblock %}
 {% block scripts %}
@@ -164,6 +199,32 @@
       hint.textContent = String(err.message || err);
     }
   }
+
+  const embSelect = document.getElementById('embedding_model');
+  const embWarn = document.getElementById('emb-warn');
+  const rerankCb = document.getElementById('rerank_enabled');
+  const rerankLabel = document.getElementById('rerank-label');
+  const rerankCand = document.getElementById('rerank_candidates');
+
+  function refreshEmbWarn() {
+    const v = embSelect.value || '';
+    const isHash = v === 'hash' || v === 'hash-embedder';
+    embWarn.classList.toggle('hidden', !isHash);
+    if (isHash) {
+      embWarn.textContent = 'HashEmbedder — тест/CI без нейросети. Качество поиска нерепрезентативно; после возврата к MiniLM нужна полная переиндексация.';
+    }
+  }
+
+  function refreshRerank() {
+    const on = rerankCb.checked;
+    rerankLabel.textContent = on ? 'вкл' : 'выкл';
+    rerankCand.disabled = !on;
+  }
+
+  embSelect.addEventListener('change', refreshEmbWarn);
+  rerankCb.addEventListener('change', refreshRerank);
+  refreshEmbWarn();
+  refreshRerank();
 
   document.getElementById('btn-refresh-models').onclick = loadOllamaModels;
   document.getElementById('settings-form').addEventListener('submit', async (e) => {

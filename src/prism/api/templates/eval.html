@@ -2,40 +2,309 @@
 {% block title %}Оценка · Prism{% endblock %}
 {% block content %}
 <section class="panel">
-  <h1>Панель оценки</h1>
-  <p class="lede muted">Сравнение абляций из <code>reports/</code>. Худшие вопросы — из per_question.jsonl.</p>
-  <div class="row">
-    <button type="button" id="btn-refresh" class="btn">Обновить таблицу</button>
+  <div class="panel-head">
+    <div class="panel-title-row">
+      <h1>Оценка поиска</h1>
+      <button type="button" class="btn btn-ghost btn-sm" id="btn-refresh">Обновить список</button>
+    </div>
+    <p class="page-intro">
+      Офлайн-прогоны по золотому набору: сравнение dense/hybrid и других конфигов.
+      Стек поиска берётся из YAML сценария, не из «Настроек» (так абляции воспроизводимы).
+      Запуск через worker — этапы ниже; PDF на странице прогона.
+    </p>
   </div>
-  <div id="chart" style="overflow:auto;margin:1rem 0"></div>
-  <div id="table" class="answer" style="overflow:auto"></div>
-  <h2>Худшие вопросы</h2>
-  <div class="row">
-    <label>Идентификатор прогона <input id="run_id" placeholder="20261116T132843Z_ablate_hybrid" /></label>
-    <button type="button" id="btn-worst" class="btn btn-ghost">Показать 2</button>
+
+  <div class="upload-box" id="eval-launch">
+    <div class="field-head">
+      <span class="field-title">Сценарий оценки</span>
+      <button type="button" class="tip" aria-label="Подсказка: сценарий" data-tip>
+        ?
+        <span class="tip-pop" role="tooltip">
+          Готовый YAML из <code>configs/eval/</code>: какой поиск гонять и на каком сплите golden.
+          Для защиты обычно берут «Гибрид · dev» и сравнивают с «Векторный · dev».
+        </span>
+      </button>
+    </div>
+    <div class="upload-rows">
+      <div class="upload-row">
+        <select id="eval-config" aria-label="Сценарий оценки"></select>
+        <button type="button" class="btn btn-sm" id="btn-start-eval">Старт</button>
+      </div>
+      <p id="eval-config-hint" class="muted eval-config-hint"></p>
+      <div class="eval-gen-row">
+        <div class="actions-stream eval-gen-switch" id="eval-gen-wrap">
+          <label class="switch" for="eval-retrieval-only">
+            <input type="checkbox" id="eval-retrieval-only" checked />
+            <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+            <span class="switch-text" id="eval-retrieval-label">Только поиск</span>
+          </label>
+          <button type="button" class="tip tip-tight" aria-label="Подсказка: режим прогона" data-tip>
+            ?
+            <span class="tip-pop tip-pop-end" role="tooltip">
+              <b>Только поиск</b> — считаем Recall/MRR/nDCG по найденным фрагментам, без LLM (быстро, для сравнения режимов поиска).<br/>
+              <b>С ответами</b> — ещё генерируем ответы и гоняем judge (намного дольше, нужна Ollama).
+            </span>
+          </button>
+        </div>
+      </div>
+    </div>
+    <div id="eval-job-status" class="muted upload-status"></div>
   </div>
-  <pre id="worst" class="answer">—</pre>
+
+  <div id="eval-active" class="panel-block hidden">
+    <h2>Идёт сейчас</h2>
+    <div id="eval-active-body" class="eval-progress"></div>
+  </div>
+
+  <p id="eval-best" class="muted"></p>
+  <div id="eval-list" class="log-list" aria-live="polite"></div>
+  <div id="eval-pager" class="log-pager hidden">
+    <button type="button" class="btn btn-ghost" id="eval-prev">Назад</button>
+    <span id="eval-page-label" class="muted"></span>
+    <button type="button" class="btn btn-ghost" id="eval-next">Вперёд</button>
+  </div>
 </section>
 {% endblock %}
 {% block scripts %}
 <script>
-  async function loadAblations(refresh=false) {
-    const r = await fetch('/api/eval/ablations' + (refresh ? '?refresh=true' : ''));
-    const data = await r.json();
-    document.getElementById('table').textContent = data.markdown || JSON.stringify(data.rows, null, 2);
-    document.getElementById('chart').innerHTML = data.svg || '';
-    if (data.rows && data.rows.length) {
-      const best = [...data.rows].filter(x => x['recall@5'] != null).sort((a,b)=>b['recall@5']-a['recall@5'])[0];
-      if (best) document.getElementById('run_id').value = best.run_id;
+(() => {
+  const PAGE_SIZE = 15;
+  let page = 1;
+  let pages = 1;
+  let pollTimer = null;
+
+  const listEl = document.getElementById('eval-list');
+  const pagerEl = document.getElementById('eval-pager');
+  const pageLabel = document.getElementById('eval-page-label');
+  const bestEl = document.getElementById('eval-best');
+  const activeWrap = document.getElementById('eval-active');
+  const activeBody = document.getElementById('eval-active-body');
+  const jobStatus = document.getElementById('eval-job-status');
+  const cfgSelect = document.getElementById('eval-config');
+
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+
+  const fmtWhen = (iso) => {
+    if (!iso) return '';
+    try {
+      return new Date(iso).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'medium' });
+    } catch { return iso; }
+  };
+  const fmtRec = (v) => (v == null || Number.isNaN(Number(v)) ? '—' : Number(v).toFixed(3));
+
+  const hintEl = document.getElementById('eval-config-hint');
+  const retrievalOnly = document.getElementById('eval-retrieval-only');
+  const retrievalLabel = document.getElementById('eval-retrieval-label');
+
+  function refreshRetrievalLabel() {
+    const onlySearch = retrievalOnly.checked;
+    retrievalLabel.textContent = onlySearch ? 'Только поиск' : 'С ответами';
+  }
+
+  function refreshConfigHint() {
+    const opt = cfgSelect.selectedOptions[0];
+    hintEl.textContent = opt?.dataset?.hint || '';
+  }
+
+  async function loadConfigs() {
+    const res = await fetch('/api/eval/configs');
+    const data = await res.json();
+    const items = data.items || [];
+    const preferred = items.find((x) => x.name === 'ablate_hybrid')
+      || items.find((x) => x.name === 'ablate_dense')
+      || items[0];
+
+    const groups = new Map();
+    for (const c of items) {
+      const g = c.group || 'Прочее';
+      if (!groups.has(g)) groups.set(g, []);
+      groups.get(g).push(c);
+    }
+    let html = '';
+    for (const [group, cfgs] of groups) {
+      html += `<optgroup label="${esc(group)}">`;
+      for (const c of cfgs) {
+        const sel = preferred && c.path === preferred.path ? ' selected' : '';
+        html += `<option value="${esc(c.path)}" data-hint="${esc(c.hint || '')}"${sel}>${esc(c.title || c.name)}</option>`;
+      }
+      html += '</optgroup>';
+    }
+    cfgSelect.innerHTML = html || '<option value="">нет сценариев</option>';
+    refreshConfigHint();
+  }
+
+  function renderActive(job) {
+    if (!job || (job.status !== 'queued' && job.status !== 'running')) {
+      activeWrap.classList.add('hidden');
+      return false;
+    }
+    activeWrap.classList.remove('hidden');
+    const pct = Math.max(0, Math.min(100, Number(job.progress) || 0));
+    const stepRu = {
+      queued: 'в очереди',
+      starting: 'старт',
+      load_dataset: 'загрузка датасета',
+      started: 'подготовка',
+      question: 'вопрос',
+      write_report: 'запись отчёта',
+      done: 'готово',
+      error: 'ошибка',
+    }[job.step] || job.step || '—';
+    const qLine = job.i && job.n
+      ? `${job.i} / ${job.n}${job.question_id ? ` · ${esc(job.question_id)}` : ''}`
+      : esc(job.detail || '');
+    activeBody.innerHTML = `
+      <div class="eval-progress-head">
+        <strong>${esc(job.eval_config || '')}</strong>
+        <span class="badge">${esc(job.status)}</span>
+      </div>
+      <div class="progress-track" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
+        <div class="progress-fill" style="width:${pct}%"></div>
+      </div>
+      <div class="muted">${pct}% · ${esc(stepRu)}${qLine ? ` · ${qLine}` : ''}</div>
+      ${job.question ? `<div class="muted eval-q">${esc(job.question)}</div>` : ''}
+      <div class="muted">job ${esc(job.id)}</div>`;
+    return true;
+  }
+
+  async function pollJobs() {
+    try {
+      const res = await fetch('/api/eval/jobs?limit=5');
+      const data = await res.json();
+      const items = data.items || [];
+      const active = items.find((j) => j.status === 'queued' || j.status === 'running');
+      const alive = renderActive(active);
+      if (active && active.status === 'running') {
+        jobStatus.textContent = `Прогон ${active.id}: ${active.progress || 0}%`;
+      }
+      const done = items.find((j) => j.status === 'completed' && j.run_id);
+      if (!alive && done) {
+        jobStatus.innerHTML =
+          `Готово: <a class="btn btn-ghost btn-sm" href="/eval/run/${encodeURIComponent(done.run_id)}">${esc(done.run_id)}</a>`;
+        await loadList();
+      }
+      if (items.some((j) => j.status === 'failed')) {
+        const failed = items.find((j) => j.status === 'failed');
+        if (failed && !alive) {
+          jobStatus.textContent = `Ошибка ${failed.id}: ${failed.error || failed.detail || '—'}`;
+        }
+      }
+      if (alive) {
+        pollTimer = setTimeout(pollJobs, 1500);
+      } else {
+        pollTimer = setTimeout(pollJobs, 5000);
+      }
+    } catch {
+      pollTimer = setTimeout(pollJobs, 4000);
     }
   }
-  document.getElementById('btn-refresh').onclick = () => loadAblations(true);
-  document.getElementById('btn-worst').onclick = async () => {
-    const id = document.getElementById('run_id').value.trim();
-    const r = await fetch('/api/eval/runs/' + encodeURIComponent(id) + '/worst?n=2');
-    const data = await r.json();
-    document.getElementById('worst').textContent = JSON.stringify(data, null, 2);
-  };
-  loadAblations(false);
+
+  async function loadList(refresh = false) {
+    listEl.innerHTML = '<p class="muted">Загрузка прогонов…</p>';
+    try {
+      const res = await fetch(
+        `/api/eval/runs?page=${page}&page_size=${PAGE_SIZE}` + (refresh ? '&refresh=true' : '')
+      );
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      pages = data.pages || 1;
+      page = data.page || 1;
+      if (data.best_run_id) {
+        bestEl.innerHTML =
+          `Лучший scientific по Recall@5: <a class="btn btn-ghost btn-sm" href="/eval/run/${encodeURIComponent(data.best_run_id)}">${esc(data.best_run_id)}</a>` +
+          ` <span class="badge ok">${esc(fmtRec(data['best_recall@5']))}</span>`;
+      } else {
+        bestEl.textContent = 'Пока нет прогонов — запустите конфиг выше (нужен arq worker).';
+      }
+      const items = data.items || [];
+      if (!items.length) {
+        listEl.innerHTML = '<p class="muted">Пусто — нет отчётов в reports/.</p>';
+        pagerEl.classList.add('hidden');
+        return;
+      }
+      listEl.innerHTML = items.map((it) => `
+        <a class="log-item" href="/eval/run/${encodeURIComponent(it.id)}">
+          <div class="log-item-main">
+            <div class="log-item-title">${esc(it.title)}</div>
+            <div class="log-item-sub muted">${esc(it.subtitle || '')}</div>
+          </div>
+          <div class="log-item-side">
+            <span class="badge ${it.role === 'scientific' ? 'ok' : ''}">${esc(it.role === 'scientific' ? 'scientific' : 'diagnostic')}</span>
+            <span class="muted log-item-when">${esc(fmtWhen(it.created_at))}</span>
+          </div>
+        </a>
+      `).join('');
+      pagerEl.classList.toggle('hidden', pages <= 1);
+      pageLabel.textContent = `стр. ${page} из ${pages} · всего ${data.total}`;
+      document.getElementById('eval-prev').disabled = page <= 1;
+      document.getElementById('eval-next').disabled = page >= pages;
+    } catch (err) {
+      listEl.innerHTML = `<p class="muted">${esc(String(err))}</p>`;
+    }
+  }
+
+  document.getElementById('btn-start-eval').addEventListener('click', async () => {
+    const cfg = cfgSelect.value;
+    if (!cfg) return;
+    const btn = document.getElementById('btn-start-eval');
+    btn.disabled = true;
+    jobStatus.textContent = 'Ставим в очередь…';
+    try {
+      const res = await fetch('/api/eval/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eval_config: cfg,
+          skip_generation: retrievalOnly.checked,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        jobStatus.textContent = typeof data.detail === 'string' ? data.detail : 'Не удалось запустить';
+        return;
+      }
+      jobStatus.textContent = `В очереди: ${data.id}`;
+      renderActive(data);
+      clearTimeout(pollTimer);
+      pollJobs();
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  document.getElementById('eval-prev').addEventListener('click', () => {
+    if (page > 1) { page -= 1; loadList(); }
+  });
+  document.getElementById('eval-next').addEventListener('click', () => {
+    if (page < pages) { page += 1; loadList(); }
+  });
+  document.getElementById('btn-refresh').addEventListener('click', async () => {
+    page = 1;
+    await loadList(true);
+  });
+
+  cfgSelect.addEventListener('change', refreshConfigHint);
+  retrievalOnly.addEventListener('change', refreshRetrievalLabel);
+  document.querySelectorAll('#eval-launch [data-tip]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const open = btn.classList.contains('open');
+      document.querySelectorAll('[data-tip].open').forEach((b) => b.classList.remove('open'));
+      if (!open) btn.classList.add('open');
+    });
+  });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('[data-tip]')) {
+      document.querySelectorAll('#eval-launch [data-tip].open').forEach((b) => b.classList.remove('open'));
+    }
+  });
+
+  refreshRetrievalLabel();
+  loadConfigs();
+  loadList();
+  pollJobs();
+})();
 </script>
 {% endblock %}
