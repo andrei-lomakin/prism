@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
 import time
 from collections import OrderedDict
+from collections.abc import Generator
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
@@ -158,6 +160,78 @@ class LLMGateway:
             self._cache.put(cache_key, result)
         return result
 
+    def chat_stream(
+        self,
+        *,
+        user_message: str,
+        system_prompt: str,
+        model: str | None = None,
+        temperature: float = 0.2,
+    ) -> Generator[str, None, LLMResult]:
+        """Yield real provider token/text deltas; ``return`` final ``LLMResult``.
+
+        Cache hit → one delta with the full text (still cheaper than a round-trip).
+        """
+        cfg = self.settings
+        user = redact_pii(user_message) if cfg.llm_pii_redact else user_message
+        system = redact_pii(system_prompt) if cfg.llm_pii_redact else system_prompt
+        model_name = model or (
+            cfg.openai_model or cfg.llm_model
+            if cfg.llm_provider == "openai_compatible"
+            else cfg.llm_model
+        )
+        cache_key = None
+        if cfg.llm_cache_enabled:
+            cache_key = hashlib.sha256(
+                f"{cfg.llm_provider}|{model_name}|{temperature}|{system}|{user}".encode()
+            ).hexdigest()
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                if cached.text:
+                    yield cached.text
+                return cached
+
+        fallbacks = [m.strip() for m in (cfg.llm_fallback_models or "").split(",") if m.strip()]
+        candidates = [model_name] + [m for m in fallbacks if m != model_name]
+        last_err: Exception | None = None
+        for cand in candidates:
+            try:
+                with span(
+                    "llm.chat_stream",
+                    attributes={
+                        "provider": cfg.llm_provider,
+                        "model": cand,
+                        "temperature": temperature,
+                        "stream": True,
+                    },
+                ):
+                    if cfg.llm_provider == "ollama":
+                        stream = self._ollama_chat_stream(
+                            user_message=user,
+                            system_prompt=system,
+                            model=cand,
+                            temperature=temperature,
+                        )
+                    elif cfg.llm_provider == "openai_compatible":
+                        stream = self._openai_chat_stream(
+                            user_message=user,
+                            system_prompt=system,
+                            model=cand,
+                            temperature=temperature,
+                        )
+                    else:
+                        raise ValueError(f"Unknown llm_provider: {cfg.llm_provider}")
+                    result = yield from stream
+                result.cost_usd = self._cost(result.tokens_in, result.tokens_out)
+                if cache_key is not None:
+                    self._cache.put(cache_key, result)
+                return result
+            except Exception as exc:  # noqa: BLE001
+                last_err = exc
+                logger.warning("LLM stream %s failed: %s", cand, exc)
+                continue
+        raise RuntimeError(f"All LLM stream candidates failed: {candidates}") from last_err
+
     def _cost(self, tokens_in: int, tokens_out: int) -> float:
         cfg = self.settings
         return (tokens_in / 1_000_000.0) * cfg.llm_input_usd_per_1m + (
@@ -258,6 +332,122 @@ class LLMGateway:
             tokens_in=int(usage.get("prompt_tokens") or 0),
             tokens_out=int(usage.get("completion_tokens") or 0),
             latency_ms=ms,
+            provider="openai_compatible",
+        )
+
+    def _ollama_chat_stream(
+        self,
+        *,
+        user_message: str,
+        system_prompt: str,
+        model: str,
+        temperature: float,
+    ) -> Generator[str, None, LLMResult]:
+        url = f"{self.settings.ollama_base_url.rstrip('/')}/api/chat"
+        body = {
+            "model": model,
+            "stream": True,
+            "options": {"temperature": temperature},
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+        }
+        t0 = time.perf_counter()
+        parts: list[str] = []
+        tokens_in = 0
+        tokens_out = 0
+        with httpx.Client(timeout=httpx.Timeout(300.0, connect=10.0)) as client:
+            with client.stream("POST", url, json=body) as resp:
+                if resp.status_code >= 400:
+                    detail = resp.read().decode("utf-8", errors="replace")
+                    raise RuntimeError(f"Ollama {resp.status_code}: {detail}")
+                for line in resp.iter_lines():
+                    if not line:
+                        continue
+                    data = json.loads(line)
+                    if data.get("error"):
+                        raise RuntimeError(f"Ollama stream error: {data['error']}")
+                    piece = ((data.get("message") or {}).get("content") or "")
+                    if piece:
+                        parts.append(piece)
+                        yield piece
+                    if data.get("done"):
+                        tokens_in = int(data.get("prompt_eval_count") or 0)
+                        tokens_out = int(data.get("eval_count") or 0)
+        text = "".join(parts).strip()
+        if not text:
+            raise RuntimeError("Empty streamed response from Ollama")
+        return LLMResult(
+            text=text,
+            model=model,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            latency_ms=int((time.perf_counter() - t0) * 1000),
+            provider="ollama",
+        )
+
+    def _openai_chat_stream(
+        self,
+        *,
+        user_message: str,
+        system_prompt: str,
+        model: str,
+        temperature: float,
+    ) -> Generator[str, None, LLMResult]:
+        base = (self.settings.openai_api_base or "").rstrip("/")
+        if not base or not self.settings.openai_api_key:
+            raise RuntimeError("OPENAI_API_BASE and OPENAI_API_KEY required")
+        headers = {
+            "Authorization": f"Bearer {self.settings.openai_api_key}",
+            "Content-Type": "application/json",
+        }
+        body = {
+            "model": model,
+            "temperature": temperature,
+            "stream": True,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+        }
+        t0 = time.perf_counter()
+        parts: list[str] = []
+        tokens_in = 0
+        tokens_out = 0
+        with httpx.Client(timeout=httpx.Timeout(300.0, connect=10.0)) as client:
+            with client.stream("POST", f"{base}/chat/completions", headers=headers, json=body) as resp:
+                if resp.status_code >= 400:
+                    detail = resp.read().decode("utf-8", errors="replace")
+                    raise RuntimeError(f"OpenAI {resp.status_code}: {detail}")
+                for line in resp.iter_lines():
+                    if not line:
+                        continue
+                    if line.startswith("data:"):
+                        line = line[5:].strip()
+                    if not line or line == "[DONE]":
+                        continue
+                    data = json.loads(line)
+                    usage = data.get("usage") or {}
+                    if usage:
+                        tokens_in = int(usage.get("prompt_tokens") or tokens_in)
+                        tokens_out = int(usage.get("completion_tokens") or tokens_out)
+                    choices = data.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = (choices[0].get("delta") or {}).get("content") or ""
+                    if delta:
+                        parts.append(delta)
+                        yield delta
+        text = "".join(parts).strip()
+        if not text:
+            raise RuntimeError("Empty streamed response from OpenAI-compatible API")
+        return LLMResult(
+            text=text,
+            model=model,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            latency_ms=int((time.perf_counter() - t0) * 1000),
             provider="openai_compatible",
         )
 

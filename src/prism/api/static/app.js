@@ -191,6 +191,7 @@ const PrismApp = {
       status: document.getElementById('run-status'),
       statusText: document.querySelector('#run-status .run-status-text'),
       steps: document.getElementById('run-steps'),
+      note: document.getElementById('answer-note'),
       answer: document.getElementById('answer'),
       sources: document.getElementById('sources'),
       trace: document.getElementById('trace-link'),
@@ -204,15 +205,20 @@ const PrismApp = {
   },
 
   _beginRun(label) {
-    const { panel, status, statusText, steps, answer, sources, trace } = this._els();
+    const { panel, status, statusText, steps, note, answer, sources, trace } = this._els();
     if (!panel) return;
     panel.classList.remove('hidden');
     panel.classList.add('running');
     if (status) status.classList.remove('done', 'error');
     if (statusText) statusText.textContent = label;
     if (steps) steps.innerHTML = '';
+    if (note) {
+      note.className = 'answer-note hidden';
+      note.textContent = '';
+    }
     if (answer) {
       answer.classList.add('hidden');
+      answer.classList.remove('is-provisional');
       answer.textContent = '';
     }
     if (sources) sources.innerHTML = '';
@@ -221,6 +227,55 @@ const PrismApp = {
       trace.innerHTML = '';
     }
     this._setBusy(true);
+  },
+
+  _setAnswerNote(text, kind = '') {
+    const { note } = this._els();
+    if (!note) return;
+    if (!text) {
+      note.className = 'answer-note hidden';
+      note.textContent = '';
+      return;
+    }
+    note.className = 'answer-note' + (kind ? ` ${kind}` : '');
+    note.textContent = text;
+  },
+
+  _markAnswerProvisional(on) {
+    const { answer } = this._els();
+    if (!answer) return;
+    answer.classList.toggle('is-provisional', !!on);
+    if (on) {
+      this._setAnswerNote(
+        'Черновик: текст идёт с модели. Проверка опоры на источники — после завершения.',
+        'is-provisional',
+      );
+    }
+  },
+
+  _applyGrounding(data) {
+    const g = data?.grounding || null;
+    const ok = g ? g.ok : data?.grounding_ok;
+    this._markAnswerProvisional(false);
+    if (ok == null) {
+      this._setAnswerNote('');
+      return;
+    }
+    if (ok) {
+      this._setAnswerNote('Проверка опоры на источники: ок', 'is-ok');
+      return;
+    }
+    const bits = [];
+    if (g?.missing?.length) bits.push(`неверные ссылки [${g.missing.join(', ')}]`);
+    if (g?.requires_citation && !(g.cited || []).length) bits.push('нет ссылок на источники');
+    if (g?.unsupported_numbers?.length) {
+      bits.push(`числа вне контекста: ${g.unsupported_numbers.slice(0, 5).join(', ')}`);
+    }
+    const detail = bits.length ? ` (${bits.join('; ')})` : '';
+    this._setAnswerNote(
+      `Слабая опора на источники${detail}. Ответ уже показан как предварительный — перепроверьте по фрагментам ниже.`,
+      'is-warn',
+    );
   },
 
   _setStatus(text, { done = false, error = false } = {}) {
@@ -276,8 +331,7 @@ const PrismApp = {
     const { answer } = this._els();
     if (!answer) return;
     answer.classList.remove('hidden');
-    // During SSE chunk stream keep plain text; final event re-renders with links.
-    // (Not live LLM tokens — finished answer sliced for UI.)
+    // Live tokens: plain text; final re-renders with cite links + grounding note.
     answer.textContent += text || '';
   },
 
@@ -400,6 +454,7 @@ const PrismApp = {
       }
       this._addStep('Ответ готов', data.model ? `модель: ${data.model}` : '');
       this._showAnswer(data.answer);
+      this._applyGrounding(data);
       this._showTrace(this._els().trace, mode, data);
       this._showCitations(this._els().sources, data.citations);
       this._setStatus('Готово', { done: true });
@@ -472,18 +527,28 @@ const PrismApp = {
           if (event === 'chunk' || event === 'token') {
             if (!answerStarted) {
               answerStarted = true;
-              this._setStatus('Печатаем ответ…');
-              this._addStep('Генерация', 'поток токенов');
+              this._setStatus('Черновик ответа…');
+              this._addStep('Генерация', 'живой поток · проверка опоры позже');
               this._showAnswer('');
+              this._markAnswerProvisional(true);
             }
             this._appendAnswer(data.text || '');
           }
           if (event === 'final') {
             this._showAnswer(data.answer || this._els().answer?.textContent || '');
+            this._applyGrounding(data);
             this._showTrace(this._els().trace, mode, data);
             this._showCitations(this._els().sources, data.citations);
-            this._setStatus('Готово', { done: true });
-            this._addStep('Готово', data.model ? `модель: ${data.model}` : '');
+            this._setStatus(
+              data.grounding_ok === false ? 'Готово · слабая опора' : 'Готово',
+              { done: true },
+            );
+            this._addStep(
+              data.grounding_ok === false ? 'Проверка опоры' : 'Готово',
+              data.grounding_ok === false
+                ? 'обнаружены проблемы — см. предупреждение'
+                : (data.model ? `модель: ${data.model}` : ''),
+            );
           }
           if (event === 'error') {
             this._setStatus(data.detail || 'Ошибка', { error: true });

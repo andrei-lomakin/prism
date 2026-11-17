@@ -46,3 +46,28 @@ def test_cache_shared_across_gateway_instances(monkeypatch):
     assert calls["n"] == 1
     assert a.cached is False
     assert b.cached is True
+
+
+def test_chat_stream_yields_deltas_then_result(monkeypatch):
+    clear_llm_cache()
+
+    def fake_stream(self, **kwargs):
+        from prism.llm.gateway import LLMResult
+
+        yield "Hel"
+        yield "lo"
+        return LLMResult(text="Hello", model="m", tokens_in=2, tokens_out=1, provider="ollama")
+
+    monkeypatch.setattr(LLMGateway, "_ollama_chat_stream", fake_stream)
+    cfg = Settings(llm_cache_enabled=False, llm_pii_redact=False, llm_provider="ollama")
+    gen = LLMGateway(cfg).chat_stream(user_message="q", system_prompt="s")
+    parts: list[str] = []
+    while True:
+        try:
+            parts.append(next(gen))
+        except StopIteration as stop:
+            result = stop.value
+            break
+    assert parts == ["Hel", "lo"]
+    assert result.text == "Hello"
+    assert result.cached is False

@@ -17,11 +17,13 @@ from prism.api.schemas import (
     ChatRequest,
     ChatResponse,
     Citation,
+    GroundingOut,
     SearchHit,
     SearchRequest,
     SearchResponse,
     UsageOut,
 )
+from prism.rag.generate.grounding import GroundingReport
 from prism.api.settings_store import settings_as_config
 from prism.db.session import get_db, get_session_factory
 from prism.llm import gateway_for
@@ -34,6 +36,21 @@ router = APIRouter(prefix="/api", tags=["chat"], dependencies=[Depends(require_u
 
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _grounding_out(report: GroundingReport) -> GroundingOut:
+    return GroundingOut(
+        ok=report.ok,
+        cited=list(report.cited),
+        missing=list(report.missing),
+        unsupported_numbers=list(report.unsupported_numbers),
+        unsupported_names=list(report.unsupported_names),
+        requires_citation=bool(report.requires_citation),
+    )
+
+
+def _grounding_dict(report: GroundingReport) -> dict[str, Any]:
+    return _grounding_out(report).model_dump()
 
 
 @router.post("/search", response_model=SearchResponse)
@@ -163,6 +180,7 @@ def api_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespons
         citations=citations,
         retrieval_mode=mode,
         grounding_ok=grounding.ok,
+        grounding=_grounding_out(grounding),
         usage=UsageOut(
             tokens_in=result.tokens_in,
             tokens_out=result.tokens_out,
@@ -175,10 +193,10 @@ def api_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespons
 
 @router.post("/chat/stream")
 def api_chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> StreamingResponse:
-    """SSE *event* stream: plan/steps/chunk/final — not live LLM token streaming.
+    """SSE: status/retrieval/plan/step + live LLM ``token`` deltas (RAG).
 
-    The model call is non-streaming; the finished answer is sliced into ``chunk``
-    events for UI progress. Agent mode also emits intermediate step events.
+    RAG uses provider ``stream: true``. Agent streams plan/steps while running;
+    the final answer is one shot after ``handle()`` (multi-call orchestration).
     """
     cfg = settings_as_config(db)
     tid = trace_buffer.start_trace()
@@ -259,24 +277,32 @@ def api_chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> Stre
                         raise payload_evt
 
                 assert answer is not None
-                yield _sse("status", {"text": "Печатаем ответ…"})
                 text = answer.answer or ""
-                chunk_size = 48
-                for i in range(0, len(text), chunk_size):
-                    yield _sse("chunk", {"text": text[i : i + chunk_size]})
-                    yield _sse(
-                        "final",
-                        {
-                            "answer": answer.answer,
-                            "model": answer.model,
-                            "citations": answer.citations,
-                            "retrieval_mode": answer.retrieval_mode,
-                            "grounding_ok": answer.grounding_ok,
-                            "trace_id": str(answer.run_id),
-                            "state": answer.state,
-                            "usage": answer.usage,
+                if text:
+                    yield _sse("status", {"text": "Ответ готов"})
+                    yield _sse("token", {"text": text})
+                yield _sse(
+                    "final",
+                    {
+                        "answer": answer.answer,
+                        "model": answer.model,
+                        "citations": answer.citations,
+                        "retrieval_mode": answer.retrieval_mode,
+                        "grounding_ok": answer.grounding_ok,
+                        "grounding": {
+                            "ok": bool(answer.grounding_ok),
+                            "cited": [],
+                            "missing": [],
+                            "unsupported_numbers": [],
+                            "unsupported_names": [],
+                            "requires_citation": False,
                         },
-                    )
+                        "trace_id": str(answer.run_id),
+                        "state": answer.state,
+                        "usage": answer.usage,
+                        "provisional_until_grounding": False,
+                    },
+                )
             else:
                 yield _sse("status", {"text": "Ищем релевантные фрагменты в базе…"})
                 hits, mode = retrieve(
@@ -302,10 +328,21 @@ def api_chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> Stre
                 ]
                 user_prompt = build_rag_prompt(payload.query, contexts)
                 gateway = gateway_for(cfg)
-                result = gateway.chat(user_message=user_prompt, system_prompt=SYSTEM_PROMPT)
-                text = result.text or ""
-                for i in range(0, len(text), 48):
-                    yield _sse("chunk", {"text": text[i : i + 48]})
+                stream = gateway.chat_stream(
+                    user_message=user_prompt,
+                    system_prompt=SYSTEM_PROMPT,
+                )
+                result = None
+                while True:
+                    try:
+                        delta = next(stream)
+                    except StopIteration as stop:
+                        result = stop.value
+                        break
+                    if delta:
+                        yield _sse("token", {"text": delta})
+                if result is None:
+                    raise RuntimeError("LLM stream returned no result")
                 grounding = check_grounding(result.text, [h.text for h in hits])
                 yield _sse(
                     "final",
@@ -327,6 +364,7 @@ def api_chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> Stre
                         ],
                         "retrieval_mode": mode,
                         "grounding_ok": grounding.ok,
+                        "grounding": _grounding_dict(grounding),
                         "trace_id": tid,
                         "usage": {
                             "tokens_in": result.tokens_in,
@@ -334,6 +372,8 @@ def api_chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> Stre
                             "cost_usd": result.cost_usd,
                             "latency_ms": result.latency_ms,
                         },
+                        # Stream text was provisional; grounding ran after generation.
+                        "provisional_until_grounding": True,
                     },
                 )
         except Exception as exc:  # noqa: BLE001

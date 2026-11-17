@@ -132,6 +132,15 @@ class UsageOut(BaseModel):
     latency_ms: int = 0
 
 
+class GroundingOut(BaseModel):
+    ok: bool
+    cited: list[int] = Field(default_factory=list)
+    missing: list[int] = Field(default_factory=list)
+    unsupported_numbers: list[str] = Field(default_factory=list)
+    unsupported_names: list[str] = Field(default_factory=list)
+    requires_citation: bool = False
+
+
 class ChatResponse(BaseModel):
     query: str
     answer: str
@@ -139,6 +148,7 @@ class ChatResponse(BaseModel):
     citations: list[Citation]
     retrieval_mode: str
     grounding_ok: bool
+    grounding: GroundingOut | None = None
     usage: UsageOut
     trace_id: str | None = None
 

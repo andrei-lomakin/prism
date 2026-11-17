@@ -656,6 +656,31 @@ a.btn { text-decoration: none; }
   margin: 0; border: 0; border-radius: 0;
   background: #eef7f4;
 }
+.run-panel .answer.is-provisional {
+  background: #f7f3ea;
+  box-shadow: inset 3px 0 0 #c4a574;
+}
+.answer-note {
+  margin: 0;
+  padding: .55rem .9rem;
+  font-size: .84rem;
+  line-height: 1.4;
+  border-bottom: 1px solid var(--line);
+}
+.answer-note.hidden { display: none; }
+.answer-note.is-provisional {
+  background: #f3ebe0;
+  color: #6a5530;
+}
+.answer-note.is-ok {
+  background: #e7f4ef;
+  color: #0f6b5c;
+}
+.answer-note.is-warn {
+  background: #f8eee4;
+  color: #8a4b12;
+  border-bottom-color: #e2c4a0;
+}
 .trace-bar {
   display: flex; align-items: center; justify-content: space-between;
   gap: .75rem; flex-wrap: wrap;
