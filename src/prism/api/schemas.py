@@ -18,6 +18,7 @@ class SettingsOut(BaseModel):
     hnsw_ef_search: int = 40
     rerank_enabled: bool = False
     rerank_candidates: int = 20
+    rerank_model: str = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
     llm_provider: str
     llm_model: str
     ollama_base_url: str
@@ -83,10 +84,16 @@ class JobOut(BaseModel):
     error_message: str | None = None
 
 
+class ChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1, max_length=8000)
+
+
 class SearchRequest(BaseModel):
     query: str = Field(..., min_length=1)
     top_k: int | None = Field(default=None, ge=1, le=50)
     space: Literal["all", "personal", "project", "shared"] = "all"
+    history: list[ChatTurn] = Field(default_factory=list, max_length=12)
 
 
 class SearchHit(BaseModel):
@@ -110,6 +117,8 @@ class ChatRequest(BaseModel):
     top_k: int | None = Field(default=None, ge=1, le=50)
     mode: Literal["rag", "agent"] = "rag"
     space: Literal["all", "personal", "project", "shared"] = "all"
+    # Prior turns only (not the current query). Used for R1 rewrite + prompt context.
+    history: list[ChatTurn] = Field(default_factory=list, max_length=12)
 
 
 class Citation(BaseModel):

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Фрагменты · Prism{% endblock %}
+{% block title %}Фрагменты · Призма{% endblock %}
 {% block content %}
 <section class="panel">
   <div class="log-detail-head">
@@ -24,6 +24,8 @@
   const PAGE_SIZE = 10;
   let page = 1;
   let pages = 1;
+  const focusChunkId = Number(new URLSearchParams(location.search).get('chunk') || 0) || null;
+  let focusResolved = !focusChunkId;
 
   const titleEl = document.getElementById('doc-title');
   const metaEl = document.getElementById('doc-meta');
@@ -42,9 +44,26 @@
     error: 'ошибка',
   };
 
+  async function resolveFocusPage() {
+    if (focusResolved || !focusChunkId) return;
+    focusResolved = true;
+    try {
+      const res = await fetch(`/api/documents/${docId}/chunks?page=1&page_size=200`);
+      const data = await res.json();
+      if (!res.ok) return;
+      const hit = (data.items || []).find((c) => Number(c.id) === focusChunkId);
+      if (!hit) return;
+      const idx = Number(hit.chunk_index);
+      if (Number.isFinite(idx) && idx >= 0) {
+        page = Math.floor(idx / PAGE_SIZE) + 1;
+      }
+    } catch (_) { /* keep page 1 */ }
+  }
+
   async function load() {
     listEl.innerHTML = '<p class="muted"><span class="spinner inline"></span> Загрузка фрагментов…</p>';
     try {
+      await resolveFocusPage();
       const res = await fetch(`/api/documents/${docId}/chunks?page=${page}&page_size=${PAGE_SIZE}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Ошибка');
@@ -64,19 +83,23 @@
         pagerEl.classList.add('hidden');
         return;
       }
-      listEl.innerHTML = items.map((c) => `
-        <article class="chunk-card">
+      listEl.innerHTML = items.map((c) => {
+        const hit = focusChunkId && Number(c.id) === focusChunkId;
+        return `
+        <article class="chunk-card${hit ? ' is-hit' : ''}" data-chunk-id="${c.id}">
           <div class="chunk-card-head">
             <strong>#${c.chunk_index}</strong>
             <span class="muted">${esc(c.section_path || 'без раздела')} · ${c.token_count || 0} ток.${c.page != null ? ` · стр. ${c.page}` : ''}</span>
           </div>
-          <pre class="chunk-card-body">${esc(c.text || '')}</pre>
-        </article>
-      `).join('');
+          <pre class="chunk-card-body">${hit ? `<mark>${esc(c.text || '')}</mark>` : esc(c.text || '')}</pre>
+        </article>`;
+      }).join('');
       pagerEl.classList.toggle('hidden', pages <= 1);
       pageLabel.textContent = `стр. ${page} из ${pages} · всего ${data.total}`;
       document.getElementById('chunk-prev').disabled = page <= 1;
       document.getElementById('chunk-next').disabled = page >= pages;
+      const hitEl = listEl.querySelector('.chunk-card.is-hit');
+      if (hitEl) hitEl.scrollIntoView({ block: 'center', behavior: 'smooth' });
     } catch (err) {
       titleEl.textContent = `Документ #${docId}`;
       listEl.innerHTML = `<p class="muted">${esc(String(err))}</p>`;

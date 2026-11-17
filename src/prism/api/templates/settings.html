@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Настройки · Prism{% endblock %}
+{% block title %}Настройки · Призма{% endblock %}
 {% block content %}
 <section class="panel">
   <div class="panel-head">
@@ -157,6 +157,9 @@
             {% if not settings.rerank_enabled %}disabled{% endif %} />
         </label>
       </div>
+      <p class="settings-model-line muted" title="{{ settings.rerank_model }}">
+        Модель: <code>{{ settings.rerank_model }}</code>
+      </p>
     </div>
 
     <label>Адрес Ollama

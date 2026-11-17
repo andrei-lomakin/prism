@@ -21,6 +21,7 @@ def _base_out(s: Settings) -> SettingsOut:
         hnsw_ef_search=int(s.hnsw_ef_search),
         rerank_enabled=bool(s.rerank_enabled),
         rerank_candidates=int(s.rerank_candidates),
+        rerank_model=s.rerank_model,
         llm_provider=s.llm_provider,
         llm_model=s.llm_model,
         ollama_base_url=s.ollama_base_url,

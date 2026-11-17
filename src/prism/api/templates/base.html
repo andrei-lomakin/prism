@@ -3,17 +3,18 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{% block title %}Prism{% endblock %}</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20261117x" />
+  <title>{% block title %}Призма{% endblock %}</title>
+  <link rel="stylesheet" href="/static/styles.css?v=20261117aj" />
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
   <div class="page">
     <header class="topbar">
       <div class="brand">
-        <span class="brand-mark">P</span>
-        <div class="brand-name">Prism</div>
+        <span class="brand-mark">П</span>
+        <div class="brand-name">Призма</div>
       </div>
       <nav class="tabs">
+        <a href="/chat" class="tab {% if active == 'chat' %}active{% endif %}">Чат</a>
         <a href="/search" class="tab {% if active == 'search' %}active{% endif %}">Поиск</a>
         <a href="/upload" class="tab {% if active == 'upload' %}active{% endif %}">База</a>
         <a href="/trace" class="tab {% if active == 'trace' %}active{% endif %}">Журнал</a>
@@ -26,7 +27,7 @@
       {% block content %}{% endblock %}
     </main>
   </div>
-  <script src="/static/app.js?v=20261117x"></script>
+  <script src="/static/app.js?v=20261117aj"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

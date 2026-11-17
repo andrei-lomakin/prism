@@ -7,11 +7,7 @@
       <h1>Оценка поиска</h1>
       <button type="button" class="btn btn-ghost btn-sm" id="btn-refresh">Обновить список</button>
     </div>
-    <p class="page-intro">
-      Офлайн-прогоны по золотому набору: сравнение dense/hybrid и других конфигов.
-      Стек поиска берётся из YAML сценария, не из «Настроек» (так абляции воспроизводимы).
-      Запуск через worker — этапы ниже; PDF на странице прогона.
-    </p>
+    <p class="page-intro">Запуск локальных сессий сценариев системы для контроля метрик.</p>
   </div>
 
   <div class="upload-box" id="eval-launch">
@@ -169,6 +165,9 @@
     return true;
   }
 
+  let seenDoneId = null;
+  let wasAlive = false;
+
   async function pollJobs() {
     try {
       const res = await fetch('/api/eval/jobs?limit=5');
@@ -183,7 +182,11 @@
       if (!alive && done) {
         jobStatus.innerHTML =
           `Готово: <a class="btn btn-ghost btn-sm" href="/eval/run/${encodeURIComponent(done.run_id)}">${esc(done.run_id)}</a>`;
-        await loadList();
+        // Reload list only once when a job just finished — not on every idle poll.
+        if (wasAlive || seenDoneId !== done.id) {
+          seenDoneId = done.id;
+          await loadList();
+        }
       }
       if (items.some((j) => j.status === 'failed')) {
         const failed = items.find((j) => j.status === 'failed');
@@ -191,18 +194,20 @@
           jobStatus.textContent = `Ошибка ${failed.id}: ${failed.error || failed.detail || '—'}`;
         }
       }
+      wasAlive = !!alive;
       if (alive) {
         pollTimer = setTimeout(pollJobs, 1500);
       } else {
-        pollTimer = setTimeout(pollJobs, 5000);
+        pollTimer = setTimeout(pollJobs, 8000);
       }
     } catch {
-      pollTimer = setTimeout(pollJobs, 4000);
+      pollTimer = setTimeout(pollJobs, 8000);
     }
   }
 
   async function loadList(refresh = false) {
-    listEl.innerHTML = '<p class="muted">Загрузка прогонов…</p>';
+    const hadItems = listEl.querySelector('.log-item');
+    if (!hadItems) listEl.innerHTML = '<p class="muted">Загрузка прогонов…</p>';
     try {
       const res = await fetch(
         `/api/eval/runs?page=${page}&page_size=${PAGE_SIZE}` + (refresh ? '&refresh=true' : '')

@@ -87,6 +87,7 @@ class AgentRuntime:
         approval_fn: Callable[..., bool] | None = None,
         persist: bool = True,
         on_step: Callable[[dict[str, Any]], None] | None = None,
+        on_status: Callable[[str], None] | None = None,
     ) -> None:
         self.db = db
         self.settings = settings or get_settings()
@@ -100,6 +101,7 @@ class AgentRuntime:
         self.persist = persist and db is not None
         self._llm = llm
         self._on_step = on_step
+        self._on_status = on_status
         self._steps: list[dict[str, Any]] = []
         self._step_n = 0
 
@@ -262,12 +264,23 @@ class AgentRuntime:
                     spawn_tool = self.registry.get("spawn_subagents")
                     assert spawn_tool is not None
                     self.limits.note_step()
+                    roles_s = ", ".join(tri.roles)
+                    self._emit_status(f"Делегирование субагентам ({roles_s})…")
+                    self._record_step(
+                        "delegation",
+                        {"roles": tri.roles, "phase": "start"},
+                        {"roles": tri.roles},
+                    )
                     gr = self.gate.execute(
                         run=run,
                         tool=spawn_tool,
                         args={"roles": tri.roles, "objective": objective},
                     )
-                    self._record_step("delegation", {"roles": tri.roles}, gr.output)
+                    self._record_step(
+                        "delegation",
+                        {"roles": tri.roles, "phase": "done"},
+                        gr.output,
+                    )
                     if not gr.executed:
                         if gr.decision.mode in ("ask", "on_request"):
                             run.state = RunState.AWAITING_APPROVAL
@@ -336,6 +349,7 @@ class AgentRuntime:
             table_md = (analyst_report or {}).get("markdown")
             web_snippets = list((web_report or {}).get("results") or [])
             _, source_texts, citations = self._merge_sources(hits, web_snippets)
+            self._emit_status("Сборка ответа моделью (после делегирования может быть долго)…")
             answer_text, model, tin, tout, cost, llm_ms = self._synthesize(
                 objective,
                 hits,
@@ -344,10 +358,12 @@ class AgentRuntime:
                 web_snippets=web_snippets,
             )
             self.limits.note_llm(tin + tout, cost)
+            self._record_step("synthesize", {"revision": False}, {"model": model})
 
             if not self.limits.would_exceed() and (
                 tri.complexity in ("verify", "research", "multi") or "critic" in tri.roles
             ):
+                self._emit_status("Проверка опоры на источники (critic)…")
                 critic_report = run_critic(
                     gate=self.gate,
                     registry=self.registry,
@@ -359,6 +375,7 @@ class AgentRuntime:
                 )
                 self._record_step("tool", {"tool": "verify_citations"}, critic_report)
                 if critic_report.get("needs_revision") and not self.limits.would_exceed():
+                    self._emit_status("Повторная сборка ответа после критика…")
                     answer_text, model2, tin2, tout2, cost2, llm_ms2 = self._synthesize(
                         objective + "\n\nИсправь неподтверждённые утверждения.",
                         hits,
@@ -492,8 +509,16 @@ class AgentRuntime:
         parent = self._active_run
         # Shared scratch so analyst can see KB/web from earlier children in same batch
         scratch: dict[str, Any] = {"hits": [], "web_results": []}
+        role_tool = {
+            "retriever": "search_kb",
+            "web": "web_search",
+            "analyst": "build_comparison_table",
+            "critic": "verify_citations",
+        }
 
         def runner(child: ChildRun) -> dict[str, Any]:
+            tool = role_tool.get(child.role, child.role)
+            self._emit_status(f"Субагент «{child.role}» ({tool})…")
             if child.role == "retriever":
                 out = run_retriever(
                     gate=self.gate,
@@ -503,6 +528,7 @@ class AgentRuntime:
                     run=parent,
                 )
                 scratch["hits"] = list(out.get("hits") or [])
+                self._record_step("tool", {"tool": tool, "role": child.role}, out)
                 return out
             if child.role == "web":
                 out = run_web(
@@ -513,9 +539,10 @@ class AgentRuntime:
                     run=parent,
                 )
                 scratch["web_results"] = list(out.get("results") or [])
+                self._record_step("tool", {"tool": tool, "role": child.role}, out)
                 return out
             if child.role == "analyst":
-                return run_analyst(
+                out = run_analyst(
                     gate=self.gate,
                     registry=self.registry,
                     limits=self.limits,
@@ -524,6 +551,8 @@ class AgentRuntime:
                     kb_hits=list(scratch.get("hits") or []),
                     web_results=list(scratch.get("web_results") or []),
                 )
+                self._record_step("tool", {"tool": tool, "role": child.role}, out)
+                return out
             if child.role == "critic":
                 hits = list(scratch.get("hits") or [])
                 web = list(scratch.get("web_results") or [])
@@ -550,6 +579,7 @@ class AgentRuntime:
                 )
                 report["hits"] = hits
                 report["web_results"] = web
+                self._record_step("tool", {"tool": tool, "role": child.role}, report)
                 return report
             return {"error": f"unknown_role:{child.role}"}
 
@@ -711,6 +741,14 @@ class AgentRuntime:
         if partial:
             return f"[частичный ответ — бюджет исчерпан]\n{body}"
         return body
+
+    def _emit_status(self, text: str) -> None:
+        if self._on_status is None:
+            return
+        try:
+            self._on_status(text)
+        except Exception:  # noqa: BLE001 — UI callback must not kill the run
+            pass
 
     def _record_step(self, kind: str, inp: dict[str, Any], out: Any) -> None:
         self._step_n += 1

@@ -1,5 +1,10 @@
 const PrismApp = {
   _lastCitations: [],
+  /** @type {{role:'user'|'assistant', content:string, citations?:any[], details_html?:string}[]} */
+  _thread: [],
+  /** @type {number|null} */
+  _dialogId: null,
+  _dialogs: [],
 
   _escapeAttr(s) {
     return String(s ?? '')
@@ -176,13 +181,22 @@ const PrismApp = {
     }
     if (kind === 'delegation') {
       const roles = (step.input?.roles || []).join(', ');
-      return roles ? `роли: ${roles}` : 'запуск субагентов';
+      const phase = step.input?.phase === 'start' ? 'старт'
+        : step.input?.phase === 'done' ? 'готово' : '';
+      const bits = [];
+      if (phase) bits.push(phase);
+      if (roles) bits.push(`роли: ${roles}`);
+      return bits.join(' · ') || 'запуск субагентов';
     }
     if (kind === 'synthesize') {
       return step.input?.revision ? 'повторная сборка после критика' : 'финальная формулировка';
     }
     if (typeof step.output === 'string') return step.output.slice(0, 160);
     return '';
+  },
+
+  _isChatPage() {
+    return !!document.getElementById('chat-page');
   },
 
   _els() {
@@ -196,7 +210,18 @@ const PrismApp = {
       sources: document.getElementById('sources'),
       trace: document.getElementById('trace-link'),
       ask: document.getElementById('btn-ask'),
+      live: document.getElementById('live-turn'),
+      liveUser: document.getElementById('live-user'),
+      empty: document.getElementById('chat-empty'),
+      scroll: document.getElementById('chat-scroll'),
+      details: document.getElementById('run-details'),
+      clearBtn: document.getElementById('btn-clear-thread'),
     };
+  },
+
+  _scrollChatBottom() {
+    const { scroll } = this._els();
+    if (scroll) scroll.scrollTop = scroll.scrollHeight;
   },
 
   _setBusy(busy) {
@@ -204,9 +229,22 @@ const PrismApp = {
     if (ask) ask.disabled = busy;
   },
 
-  _beginRun(label) {
-    const { panel, status, statusText, steps, note, answer, sources, trace } = this._els();
-    if (!panel) return;
+  _beginRun(label, { query = '' } = {}) {
+    const {
+      panel, status, statusText, steps, note, answer, sources, trace,
+      live, liveUser, empty, details, clearBtn,
+    } = this._els();
+    if (this._isChatPage()) {
+      if (empty) empty.classList.add('hidden');
+      if (live) live.classList.remove('hidden');
+      if (liveUser) liveUser.textContent = query;
+      if (clearBtn) clearBtn.classList.remove('hidden');
+      if (details) details.open = false;
+    }
+    if (!panel) {
+      this._setBusy(true);
+      return;
+    }
     panel.classList.remove('hidden');
     panel.classList.add('running');
     if (status) status.classList.remove('done', 'error');
@@ -227,6 +265,7 @@ const PrismApp = {
       trace.innerHTML = '';
     }
     this._setBusy(true);
+    this._scrollChatBottom();
   },
 
   _setAnswerNote(text, kind = '') {
@@ -253,29 +292,10 @@ const PrismApp = {
     }
   },
 
-  _applyGrounding(data) {
-    const g = data?.grounding || null;
-    const ok = g ? g.ok : data?.grounding_ok;
+  _applyGrounding(_data) {
+    // Grounding still runs server-side (journal/eval); don't scare the chat UI.
     this._markAnswerProvisional(false);
-    if (ok == null) {
-      this._setAnswerNote('');
-      return;
-    }
-    if (ok) {
-      this._setAnswerNote('Проверка опоры на источники: ок', 'is-ok');
-      return;
-    }
-    const bits = [];
-    if (g?.missing?.length) bits.push(`неверные ссылки [${g.missing.join(', ')}]`);
-    if (g?.requires_citation && !(g.cited || []).length) bits.push('нет ссылок на источники');
-    if (g?.unsupported_numbers?.length) {
-      bits.push(`числа вне контекста: ${g.unsupported_numbers.slice(0, 5).join(', ')}`);
-    }
-    const detail = bits.length ? ` (${bits.join('; ')})` : '';
-    this._setAnswerNote(
-      `Слабая опора на источники${detail}. Ответ уже показан как предварительный — перепроверьте по фрагментам ниже.`,
-      'is-warn',
-    );
+    this._setAnswerNote('');
   },
 
   _setStatus(text, { done = false, error = false } = {}) {
@@ -298,15 +318,25 @@ const PrismApp = {
     li.innerHTML = `<div class="run-step-title">${this._escape(title)}</div>` +
       (detail ? `<div class="run-step-detail">${this._escape(detail)}</div>` : '');
     steps.appendChild(li);
-    li.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    if (!this._isChatPage()) {
+      li.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
     return li;
   },
 
   _renderAnswerHtml(text) {
-    const escaped = this._escape(text || '');
-    return escaped.replace(/\[(\d+)\]/g, (_, n) =>
-      `<a href="#cite-${n}" class="cite-ref" data-cite="${n}" title="Открыть источник [${n}]">[${n}]</a>`
+    let html = this._renderMarkdown(text || '');
+    // Markdown turns [n] into spans; make them clickable cite links.
+    html = html.replace(
+      /<span class="cite-ref">\[(\d+)\]<\/span>/g,
+      '<a href="#cite-$1" class="cite-ref" data-cite="$1" title="Открыть источник [$1]">[$1]</a>',
     );
+    // Any leftover bare [n] outside inline md paths.
+    html = html.replace(
+      /(?<!["=])\[(\d+)\](?!:)/g,
+      '<a href="#cite-$1" class="cite-ref" data-cite="$1" title="Открыть источник [$1]">[$1]</a>',
+    );
+    return html;
   },
 
   _bindAnswerCitationClicks(answerEl) {
@@ -323,20 +353,36 @@ const PrismApp = {
     const { answer } = this._els();
     if (!answer) return;
     answer.classList.remove('hidden');
+    answer.classList.add('md-body');
     answer.innerHTML = this._renderAnswerHtml(text);
     this._bindAnswerCitationClicks(answer);
+    this._scrollChatBottom();
   },
 
   _appendAnswer(text) {
     const { answer } = this._els();
     if (!answer) return;
     answer.classList.remove('hidden');
-    // Live tokens: plain text; final re-renders with cite links + grounding note.
+    answer.classList.remove('md-body');
+    // Live tokens: plain text; final re-renders as markdown.
     answer.textContent += text || '';
+    this._scrollChatBottom();
   },
 
-  openCitation(n) {
-    const c = (this._lastCitations || []).find((x) => Number(x.n) === Number(n));
+  _findCitation(n, pool) {
+    const want = Number(n);
+    const from = (list) => (list || []).find((x) => Number(x.n) === want);
+    let c = from(pool) || from(this._lastCitations);
+    if (c) return c;
+    for (const t of this._thread || []) {
+      c = from(t.citations);
+      if (c) return c;
+    }
+    return null;
+  },
+
+  openCitation(n, pool) {
+    const c = this._findCitation(n, pool);
     const drawer = document.getElementById('cite-drawer');
     const title = document.getElementById('cite-drawer-title');
     const meta = document.getElementById('cite-drawer-meta');
@@ -349,22 +395,30 @@ const PrismApp = {
       drawer.classList.remove('hidden');
       return;
     }
+    this._lastCitations = pool || this._lastCitations || [c];
     const kind = c.kind === 'web' || c.url ? 'web' : 'kb';
-    title.textContent = `[${c.n}] ${c.title || (kind === 'web' ? 'веб' : 'документ')}`;
+    title.textContent = `[${c.n}] ${c.title || c.document_name || (kind === 'web' ? 'веб' : 'документ')}`;
     const bits = [];
     if (kind === 'web') bits.push('веб');
     if (c.page != null) bits.push(`стр. ${c.page}`);
-    if (c.doc_id) bits.push(`документ #${c.doc_id}`);
     if (c.chunk_id) bits.push(`фрагмент #${c.chunk_id}`);
     if (c.score != null && kind === 'kb') bits.push(`релевантность ${c.score}`);
-    if (c.url) {
-      meta.innerHTML =
-        (bits.length ? this._escape(bits.join(' · ')) + ' · ' : '') +
-        `<a href="${this._escapeAttr(c.url)}" target="_blank" rel="noopener noreferrer">${this._escape(c.url)}</a>`;
-    } else {
-      if (c.section_path) bits.push(c.section_path);
-      meta.textContent = bits.join(' · ') || '—';
+    const links = [];
+    if (c.doc_id) {
+      links.push(
+        `<a href="/upload/${encodeURIComponent(c.doc_id)}?chunk=${encodeURIComponent(c.chunk_id || '')}" target="_blank" rel="noopener noreferrer">открыть документ</a>`,
+      );
     }
+    if (c.url) {
+      links.push(
+        `<a href="${this._escapeAttr(c.url)}" target="_blank" rel="noopener noreferrer">${this._escape(c.url)}</a>`,
+      );
+    }
+    if (c.section_path && kind === 'kb') bits.push(c.section_path);
+    meta.innerHTML = [
+      bits.length ? this._escape(bits.join(' · ')) : '',
+      links.join(' · '),
+    ].filter(Boolean).join(' · ') || '—';
     const snippet = c.text || '';
     body.innerHTML = snippet
       ? `<mark>${this._escape(snippet)}</mark>`
@@ -383,42 +437,64 @@ const PrismApp = {
       ? `/trace/run/${encodeURIComponent(data.trace_id)}`
       : `/trace/log/${encodeURIComponent(data.trace_id)}`;
     const modeLabel = this._modeRu(data.retrieval_mode || mode);
-    const ground = data.grounding_ok == null
-      ? ''
-      : (data.grounding_ok
-        ? '<span class="badge ok">опора на источники</span>'
-        : '<span class="badge err">слабая опора</span>');
     traceEl.classList.remove('hidden');
     traceEl.innerHTML = `
       <div class="trace-meta">
         <span class="muted">${this._escape(modeLabel)}</span>
-        ${ground}
       </div>
       <a class="btn btn-ghost btn-sm" href="${href}">Открыть в журнале</a>`;
+  },
+
+  _sourceDocHref(c) {
+    if (!c) return '';
+    if (c.doc_id) {
+      const chunk = c.chunk_id != null && c.chunk_id !== '' ? `?chunk=${encodeURIComponent(c.chunk_id)}` : '';
+      return `/upload/${encodeURIComponent(c.doc_id)}${chunk}`;
+    }
+    if (c.url) return String(c.url);
+    return '';
+  },
+
+  _sourcesDetailsHtml(citations) {
+    const list = citations || [];
+    if (!list.length) return '';
+    const items = list.map((c) => {
+      const kind = c.kind === 'web' || c.url ? 'web' : 'kb';
+      const title = c.title || c.document_name || 'источник';
+      const label = `[${c.n}] ${kind === 'web' ? '[web] ' : ''}${this._escape(title)}`;
+      const href = this._sourceDocHref(c);
+      const meta = href
+        ? `<a class="meta source-doc" href="${this._escapeAttr(href)}" target="_blank" rel="noopener noreferrer" title="Открыть документ с подсветкой">${label}</a>`
+        : `<button type="button" class="meta source-doc source-doc-btn" data-cite="${c.n}" title="Показать фрагмент">${label}</button>`;
+      return `<div class="source" id="cite-${c.n}">${meta}` +
+        `<button type="button" class="source-peek" data-cite="${c.n}" title="Показать фрагмент">фрагмент</button>` +
+        `</div>`;
+    }).join('');
+    return `<details class="sources-details chat-sources">` +
+      `<summary class="sources-summary">Источники <span class="muted">${list.length}</span></summary>` +
+      `<div class="sources">${items}</div></details>`;
+  },
+
+  _bindSourceClicks(root, citations) {
+    if (!root) return;
+    root.querySelectorAll('[data-cite]').forEach((el) => {
+      const open = () => this.openCitation(Number(el.getAttribute('data-cite')), citations);
+      el.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        open();
+      });
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+      });
+    });
   },
 
   _showCitations(sourcesEl, citations) {
     if (!sourcesEl) return;
     this._lastCitations = citations || [];
-    sourcesEl.innerHTML = (citations || []).map((c) => {
-      const kind = c.kind === 'web' || c.url ? 'web' : 'kb';
-      const loc = c.url
-        ? this._escape(c.url)
-        : (c.section_path ? this._escape(c.section_path) : '');
-      const scoreBit = kind === 'kb' && c.score != null ? ` · релевантность ${c.score}` : '';
-      return `
-      <div class="source" role="button" tabindex="0" data-cite="${c.n}" title="Показать цитируемый фрагмент">
-        <div class="meta">[${c.n}] ${kind === 'web' ? '[web] ' : ''}${this._escape(c.title)}${scoreBit}${loc ? ' · ' + loc : ''}</div>
-        <div class="muted">${this._escape((c.text || '').slice(0, 180))}${(c.text || '').length > 180 ? '…' : ''}</div>
-      </div>`;
-    }).join('');
-    sourcesEl.querySelectorAll('[data-cite]').forEach((el) => {
-      const open = () => this.openCitation(Number(el.getAttribute('data-cite')));
-      el.addEventListener('click', open);
-      el.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
-      });
-    });
+    sourcesEl.innerHTML = this._sourcesDetailsHtml(citations);
+    this._bindSourceClicks(sourcesEl, citations);
   },
 
   _chatPayload() {
@@ -428,53 +504,265 @@ const PrismApp = {
       query: document.getElementById('query').value.trim(),
       mode: mode === 'search' ? 'rag' : mode,
       space: document.getElementById('space')?.value || 'all',
+      history: this._thread.slice(-8),
     };
   },
 
-  async chat() {
-    const payload = this._chatPayload();
-    const { mode } = payload;
-    if (!payload.query) return;
-    this._beginRun(mode === 'agent' ? 'Агент работает…' : 'Ищем и генерируем ответ…');
-    this._addStep('Запуск', mode === 'agent' ? 'мультиагентный режим' : 'быстрый RAG', { active: true });
+  renderThread() {
+    const el = document.getElementById('thread');
+    const { empty, live } = this._els();
+    const has = this._thread.length > 0;
+    const liveOn = live && !live.classList.contains('hidden');
+    if (empty) empty.classList.toggle('hidden', has || liveOn);
+    if (!el) return;
+    if (!has) {
+      el.innerHTML = '';
+      this._highlightActiveDialog();
+      return;
+    }
+    el.innerHTML = this._thread.map((t) => {
+      const role = t.role === 'user' ? 'Вы' : 'Призма';
+      const body = t.role === 'assistant'
+        ? this._renderAnswerHtml(t.content)
+        : this._escape(t.content);
+      const cites = (t.role === 'assistant' && t.citations && t.citations.length)
+        ? this._sourcesDetailsHtml(t.citations)
+        : '';
+      const details = (t.role === 'assistant' && t.details_html) ? t.details_html : '';
+      const bodyClass = t.role === 'assistant' ? 'thread-body md-body' : 'thread-body';
+      return `<article class="thread-turn is-${this._escapeAttr(t.role)}" data-turn-cites="${t.role === 'assistant' && t.citations ? '1' : '0'}">` +
+        `<div class="thread-role">${role}</div>` +
+        `<div class="${bodyClass}">${body}</div>${cites}${details}</article>`;
+    }).join('');
+    el.querySelectorAll('article.thread-turn').forEach((art, idx) => {
+      const turn = this._thread[idx];
+      const cites = turn?.citations || null;
+      art.querySelectorAll('[data-cite]').forEach((node) => {
+        node.addEventListener('click', (e) => {
+          e.preventDefault();
+          this.openCitation(Number(node.getAttribute('data-cite')), cites);
+        });
+      });
+    });
+    this._highlightActiveDialog();
+    this._scrollChatBottom();
+  },
+
+  clearThread() {
+    this._dialogId = null;
+    this._thread = [];
+    const { live, answer, sources, panel, empty } = this._els();
+    if (live) live.classList.add('hidden');
+    if (answer) {
+      answer.classList.add('hidden');
+      answer.textContent = '';
+    }
+    if (sources) sources.innerHTML = '';
+    if (panel) panel.classList.add('hidden');
+    if (empty) empty.classList.remove('hidden');
+    this.renderThread();
+    this._highlightActiveDialog();
+    const q = document.getElementById('query');
+    if (q) {
+      q.value = '';
+      q.focus();
+    }
+  },
+
+  async loadDialogList() {
+    if (!this._isChatPage()) return;
+    const box = document.getElementById('dialog-list');
+    if (!box) return;
     try {
-      const res = await fetch('/api/chat', {
+      const res = await fetch('/api/dialogs');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'list failed');
+      this._dialogs = data.items || [];
+    } catch {
+      this._dialogs = [];
+    }
+    this._renderDialogList();
+  },
+
+  _renderDialogList() {
+    const box = document.getElementById('dialog-list');
+    if (!box) return;
+    if (!this._dialogs.length) {
+      box.innerHTML = '<p class="muted dialog-list-empty">Пока пусто</p>';
+      return;
+    }
+    box.innerHTML = this._dialogs.map((d) => {
+      const active = this._dialogId === d.id ? ' is-active' : '';
+      return `<div class="dialog-item${active}" data-dialog-id="${d.id}">` +
+        `<button type="button" class="dialog-item-open" data-dialog-open="${d.id}">` +
+        `<span class="dialog-item-title">${this._escape(d.title || 'Диалог')}</span>` +
+        `<span class="dialog-item-meta muted">${d.n_messages || 0} сообщ.</span>` +
+        `</button>` +
+        `<button type="button" class="dialog-item-del" data-dialog-del="${d.id}" title="Удалить" aria-label="Удалить">×</button>` +
+        `</div>`;
+    }).join('');
+    box.querySelectorAll('[data-dialog-open]').forEach((btn) => {
+      btn.addEventListener('click', () => this.openDialog(Number(btn.getAttribute('data-dialog-open'))));
+    });
+    box.querySelectorAll('[data-dialog-del]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.deleteDialog(Number(btn.getAttribute('data-dialog-del')));
+      });
+    });
+  },
+
+  _highlightActiveDialog() {
+    document.querySelectorAll('.dialog-item').forEach((el) => {
+      el.classList.toggle('is-active', Number(el.getAttribute('data-dialog-id')) === this._dialogId);
+    });
+  },
+
+  async openDialog(id) {
+    if (!id) return;
+    try {
+      const res = await fetch(`/api/dialogs/${id}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'load failed');
+      this._dialogId = data.id;
+      this._thread = (data.messages || []).map((m) => ({
+        role: m.role,
+        content: m.content,
+        citations: m.citations || null,
+      }));
+      const { live, panel, answer, sources } = this._els();
+      if (live) live.classList.add('hidden');
+      if (panel) panel.classList.add('hidden');
+      if (answer) {
+        answer.classList.add('hidden');
+        answer.textContent = '';
+      }
+      if (sources) sources.innerHTML = '';
+      const meta = data.meta || {};
+      if (meta.mode) {
+        const modeSel = document.getElementById('mode');
+        const radio = document.querySelector(`input[name="mode"][value="${meta.mode}"]`);
+        if (modeSel) modeSel.value = meta.mode;
+        if (radio) radio.checked = true;
+      }
+      if (meta.space) {
+        const spaceSel = document.getElementById('space');
+        const radio = document.querySelector(`input[name="space"][value="${meta.space}"]`);
+        if (spaceSel) spaceSel.value = meta.space;
+        if (radio) radio.checked = true;
+      }
+      this.renderThread();
+      this._highlightActiveDialog();
+    } catch (err) {
+      console.warn(err);
+    }
+  },
+
+  async deleteDialog(id) {
+    const ok = await this.confirm({
+      title: 'Удалить диалог?',
+      body: 'История переписки будет удалена без восстановления.',
+      confirmLabel: 'Удалить',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const res = await fetch(`/api/dialogs/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || 'delete failed');
+      }
+      if (this._dialogId === id) this.clearThread();
+      await this.loadDialogList();
+    } catch (err) {
+      console.warn(err);
+    }
+  },
+
+  async saveDialog() {
+    if (!this._isChatPage() || !this._thread.length) return;
+    const messages = this._thread.map((t) => ({
+      role: t.role,
+      content: t.content,
+      ...(t.citations ? { citations: t.citations } : {}),
+    }));
+    const body = {
+      id: this._dialogId,
+      messages,
+      meta: {
+        mode: document.getElementById('mode')?.value || 'rag',
+        space: document.getElementById('space')?.value || 'shared',
+      },
+    };
+    try {
+      const res = await fetch('/api/dialogs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
-      if (!res.ok) {
-        this._setStatus(data.detail || 'Ошибка', { error: true });
-        this._showAnswer(data.detail || 'Ошибка');
-        return;
-      }
-      if (data.retrieval_mode) {
-        this._addStep('Поиск', this._modeRu(data.retrieval_mode));
-      }
-      this._addStep('Ответ готов', data.model ? `модель: ${data.model}` : '');
-      this._showAnswer(data.answer);
-      this._applyGrounding(data);
-      this._showTrace(this._els().trace, mode, data);
-      this._showCitations(this._els().sources, data.citations);
-      this._setStatus('Готово', { done: true });
+      if (!res.ok) throw new Error(data.detail || 'save failed');
+      this._dialogId = data.id;
+      await this.loadDialogList();
     } catch (err) {
-      this._setStatus(String(err), { error: true });
-      this._showAnswer(String(err));
+      console.warn(err);
     }
+  },
+
+  _commitTurn(query, answer, extra = {}) {
+    const q = String(query || '').trim();
+    const a = String(answer || '').trim();
+    if (!q || !a) return;
+    let detailsHtml = '';
+    if (this._isChatPage()) {
+      const { steps, trace } = this._els();
+      const stepsClone = steps && steps.children.length ? steps.outerHTML : '';
+      const traceClone = (trace && !trace.classList.contains('hidden') ? trace.outerHTML : '') || '';
+      if (stepsClone || traceClone) {
+        detailsHtml =
+          `<details class="run-details thread-details">` +
+          `<summary class="run-summary"><span>Ход ответа</span><span class="run-summary-hint muted">шаги</span></summary>` +
+          `${stepsClone}${traceClone}</details>`;
+      }
+    }
+    this._thread.push({ role: 'user', content: q });
+    this._thread.push({
+      role: 'assistant',
+      content: a,
+      citations: extra.citations || null,
+      details_html: detailsHtml,
+    });
+    if (this._thread.length > 16) this._thread = this._thread.slice(-16);
+    const { live, panel } = this._els();
+    if (live) live.classList.add('hidden');
+    if (panel) panel.classList.add('hidden');
+    this.renderThread();
+    const input = document.getElementById('query');
+    if (input) input.value = '';
+    this.saveDialog();
+  },
+
+  async chat() {
+    return this.chatStream();
   },
 
   async chatStream() {
     const payload = this._chatPayload();
     const { mode } = payload;
     if (!payload.query) return;
-    this._beginRun(mode === 'agent' ? 'Агент запускается…' : 'Запускаем поиск…');
-    this._addStep('Подключение', 'потоковый режим', { active: true });
+    const q = payload.query;
+    const input = document.getElementById('query');
+    if (input && this._isChatPage()) input.value = '';
+    this._beginRun(
+      mode === 'agent' ? 'Агент запускается…' : 'Ищем по базе…',
+      { query: q },
+    );
+    this._addStep('Подключение', mode === 'agent' ? 'агент' : 'RAG', { active: true });
     try {
       const res = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, query: q }),
       });
       if (!res.ok || !res.body) {
         this._setStatus('Ошибка потока', { error: true });
@@ -521,34 +809,27 @@ const PrismApp = {
             const docs = (data.docs || []).slice(0, 3).join(', ');
             const detail = `${this._modeRu(data.mode)} · найдено: ${data.n}` +
               (docs ? ` · примеры: ${docs}` : '');
-            this._setStatus('Контекст собран, генерируем ответ…');
+            this._setStatus('Генерируем ответ…');
             this._addStep('Поиск по базе', detail, { active: true });
           }
           if (event === 'chunk' || event === 'token') {
             if (!answerStarted) {
               answerStarted = true;
-              this._setStatus('Черновик ответа…');
-              this._addStep('Генерация', 'живой поток · проверка опоры позже');
+              this._setStatus('Печатаем ответ…');
+              this._addStep('Генерация', 'поток от модели');
               this._showAnswer('');
-              this._markAnswerProvisional(true);
             }
             this._appendAnswer(data.text || '');
           }
           if (event === 'final') {
-            this._showAnswer(data.answer || this._els().answer?.textContent || '');
+            const answerText = data.answer || this._els().answer?.textContent || '';
+            this._showAnswer(answerText);
             this._applyGrounding(data);
             this._showTrace(this._els().trace, mode, data);
             this._showCitations(this._els().sources, data.citations);
-            this._setStatus(
-              data.grounding_ok === false ? 'Готово · слабая опора' : 'Готово',
-              { done: true },
-            );
-            this._addStep(
-              data.grounding_ok === false ? 'Проверка опоры' : 'Готово',
-              data.grounding_ok === false
-                ? 'обнаружены проблемы — см. предупреждение'
-                : (data.model ? `модель: ${data.model}` : ''),
-            );
+            this._addStep('Готово', data.model ? `модель: ${data.model}` : '');
+            this._setStatus('Готово', { done: true });
+            this._commitTurn(q, answerText, { citations: data.citations || [] });
           }
           if (event === 'error') {
             this._setStatus(data.detail || 'Ошибка', { error: true });
@@ -579,6 +860,7 @@ const PrismApp = {
           query: payload.query,
           top_k: payload.top_k,
           space: payload.space,
+          history: payload.history || [],
         }),
       });
       const data = await res.json();
@@ -604,11 +886,16 @@ const PrismApp = {
       );
       if (answer) answer.classList.add('hidden');
       if (sources) {
-        sources.innerHTML = (data.results || []).map((r, i) => `
-          <div class="source">
-            <div class="meta">[${i + 1}] ${this._escape(r.document_name)} · релевантность ${r.score}</div>
-            <div>${this._escape(r.text.slice(0, 400))}${r.text.length > 400 ? '…' : ''}</div>
-          </div>`).join('');
+        const fake = (data.results || []).map((r, i) => ({
+          n: i + 1,
+          title: r.document_name,
+          document_name: r.document_name,
+          text: r.text,
+          score: r.score,
+          doc_id: r.document_id,
+          chunk_id: r.chunk_id,
+        }));
+        this._showCitations(sources, fake);
       }
       this._setStatus(`Найдено фрагментов: ${data.results.length}`, { done: true });
     } catch (err) {

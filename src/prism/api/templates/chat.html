@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Чат · Призма{% endblock %}
+{% block body_class %}page-chat{% endblock %}
+{% block content %}
+<div class="chat-layout" id="chat-page">
+  <aside class="chat-sidebar" aria-label="Диалоги">
+    <button type="button" class="btn btn-sm chat-new-btn" id="btn-new-dialog">Новый</button>
+    <div id="dialog-list" class="dialog-list"></div>
+  </aside>
+
+  <section class="chat-shell">
+    <div class="chat-scroll" id="chat-scroll">
+      <div class="chat-empty" id="chat-empty">
+        <p class="chat-empty-title">Спросите по базе знаний</p>
+        <p class="muted">Диалоги сохраняются автоматически.</p>
+      </div>
+      <div id="thread" class="thread chat-thread" aria-live="polite"></div>
+
+      <div id="live-turn" class="live-turn hidden">
+        <article class="thread-turn is-user">
+          <div class="thread-role">Вы</div>
+          <div class="thread-body" id="live-user"></div>
+        </article>
+
+        <div id="run-panel" class="run-panel chat-run hidden">
+          <details id="run-details" class="run-details">
+            <summary class="run-summary">
+              <span id="run-status" class="run-status chat-run-status" aria-live="polite">
+                <span class="spinner" aria-hidden="true"></span>
+                <span class="run-status-text">Готовимся…</span>
+              </span>
+              <span class="run-summary-hint muted">шаги</span>
+            </summary>
+            <ol id="run-steps" class="run-steps"></ol>
+            <div id="trace-link" class="trace-bar hidden"></div>
+          </details>
+          <div id="answer-note" class="answer-note hidden" role="status" aria-live="polite"></div>
+        </div>
+
+        <article class="thread-turn is-assistant">
+          <div class="thread-role">Призма</div>
+          <div id="answer" class="thread-body answer hidden"></div>
+          <div id="sources" class="sources chat-sources"></div>
+        </article>
+      </div>
+    </div>
+
+    <form id="chat-form" class="chat-composer">
+      <div class="composer-top">
+        <div class="seg seg-wrap composer-seg" role="radiogroup" aria-label="Режим">
+          <label class="seg-item">
+            <input type="radio" name="mode" value="rag" checked />
+            <span>Ответ</span>
+          </label>
+          <label class="seg-item">
+            <input type="radio" name="mode" value="agent" />
+            <span>Агент</span>
+          </label>
+        </div>
+        <div class="seg seg-wrap composer-seg" role="radiogroup" aria-label="Где искать">
+          <label class="seg-item">
+            <input type="radio" name="space" value="all" />
+            <span>Все</span>
+          </label>
+          <label class="seg-item">
+            <input type="radio" name="space" value="personal" />
+            <span>Личное</span>
+          </label>
+          <label class="seg-item">
+            <input type="radio" name="space" value="project" />
+            <span>Проект</span>
+          </label>
+          <label class="seg-item">
+            <input type="radio" name="space" value="shared" checked />
+            <span>Общее</span>
+          </label>
+        </div>
+        <select id="mode" class="sr-only" tabindex="-1" aria-hidden="true">
+          <option value="rag" selected>rag</option>
+          <option value="agent">agent</option>
+        </select>
+        <select id="space" class="sr-only" tabindex="-1" aria-hidden="true">
+          <option value="all">all</option>
+          <option value="personal">personal</option>
+          <option value="project">project</option>
+          <option value="shared" selected>shared</option>
+        </select>
+        <input type="checkbox" id="stream" checked class="sr-only" tabindex="-1" aria-hidden="true" />
+      </div>
+      <div class="composer-row">
+        <textarea id="query" rows="2" placeholder="Спросите или уточните…" required aria-label="Сообщение"></textarea>
+        <button type="submit" class="btn" id="btn-ask">Отправить</button>
+      </div>
+    </form>
+  </section>
+</div>
+
+<aside id="cite-drawer" class="cite-drawer hidden" aria-live="polite">
+  <div class="cite-drawer-head">
+    <strong id="cite-drawer-title">Источник</strong>
+    <button type="button" class="btn btn-ghost" id="cite-drawer-close">Закрыть</button>
+  </div>
+  <p id="cite-drawer-meta" class="muted"></p>
+  <div id="cite-drawer-body" class="cite-drawer-body"></div>
+</aside>
+{% endblock %}
+{% block scripts %}
+<script>
+  function syncHidden(name, selectId) {
+    const checked = document.querySelector(`input[name="${name}"]:checked`);
+    const sel = document.getElementById(selectId);
+    if (checked && sel) sel.value = checked.value;
+  }
+  document.querySelectorAll('input[name="mode"], input[name="space"]').forEach((el) => {
+    el.addEventListener('change', () => {
+      syncHidden('mode', 'mode');
+      syncHidden('space', 'space');
+    });
+  });
+  syncHidden('mode', 'mode');
+  syncHidden('space', 'space');
+
+  document.getElementById('btn-new-dialog')?.addEventListener('click', () => PrismApp.clearThread());
+  document.getElementById('chat-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    syncHidden('mode', 'mode');
+    syncHidden('space', 'space');
+    await PrismApp.chatStream();
+  });
+  document.getElementById('query')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      document.getElementById('chat-form')?.requestSubmit();
+    }
+  });
+  document.getElementById('cite-drawer-close')?.addEventListener('click', () => PrismApp.closeCitation());
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') PrismApp.closeCitation();
+  });
+  PrismApp.renderThread();
+  PrismApp.loadDialogList();
+</script>
+{% endblock %}

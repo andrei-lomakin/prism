@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from prism.api.routes import chat, documents, eval_ui, memory, runs
+from prism.api.routes import chat, dialogs, documents, eval_ui, memory, runs
 from prism.api.routes import settings as settings_routes
 from prism.api.settings_store import get_effective_settings
 from prism.config import get_settings
@@ -54,6 +54,7 @@ templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
 
 app.include_router(documents.router)
 app.include_router(chat.router)
+app.include_router(dialogs.router)
 app.include_router(settings_routes.router)
 app.include_router(runs.router)
 app.include_router(eval_ui.router)
@@ -62,7 +63,12 @@ app.include_router(memory.router)
 
 @app.get("/", response_class=RedirectResponse)
 def root() -> RedirectResponse:
-    return RedirectResponse(url="/search", status_code=302)
+    return RedirectResponse(url="/chat", status_code=302)
+
+
+@app.get("/chat", response_class=HTMLResponse)
+def page_chat(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(request, "chat.html", {"active": "chat"})
 
 
 @app.get("/search", response_class=HTMLResponse)

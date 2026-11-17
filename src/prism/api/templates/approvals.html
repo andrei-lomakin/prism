@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Одобрения · Prism{% endblock %}
+{% block title %}Одобрения · Призма{% endblock %}
 {% block content %}
 <section class="panel">
   <div class="panel-head">
@@ -7,7 +7,7 @@
       <h1>Очередь одобрений</h1>
       <button type="button" id="btn-refresh" class="btn">Обновить</button>
     </div>
-    <p class="page-intro">Здесь ждут действия, которые нельзя выполнить молча — например выход в сеть. Одобрите или отклоните; без ответа запрос сам протухнет через несколько минут.</p>
+    <p class="page-intro">Действия агента, требующие валидации пользователем (выход в сеть, песочница, правки памяти и т. п.). Запрос имеет срок действия.</p>
   </div>
   <div id="list" class="item-list"></div>
 </section>

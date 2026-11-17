@@ -53,9 +53,44 @@ def _grounding_dict(report: GroundingReport) -> dict[str, Any]:
     return _grounding_out(report).model_dump()
 
 
+def _history_dicts(payload: ChatRequest) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    for turn in payload.history[-8:]:
+        content = (turn.content or "").strip()
+        if not content:
+            continue
+        out.append({"role": turn.role, "content": content[:4000]})
+    return out
+
+
+def _dialog_settings(cfg: Any, history: list[dict[str, str]]) -> Any:
+    """If follow-up turns exist and rewrite is R0, bump to R1 for this request."""
+    if history and getattr(cfg, "rewrite_strategy", "R0") == "R0":
+        return cfg.model_copy(update={"rewrite_strategy": "R1"})
+    return cfg
+
+
+def _objective_with_history(query: str, history: list[dict[str, str]]) -> str:
+    if not history:
+        return query
+    lines = []
+    for t in history[-6:]:
+        role = "user" if t["role"] == "user" else "assistant"
+        lines.append(f"{role}: {t['content'][:800]}")
+    return (
+        "Продолжение диалога.\n" + "\n".join(lines) + f"\n\nТекущий запрос пользователя:\n{query}"
+    )
+
+
 @router.post("/search", response_model=SearchResponse)
 def api_search(payload: SearchRequest, db: Session = Depends(get_db)) -> SearchResponse:
     cfg = settings_as_config(db)
+    history = [
+        {"role": t.role, "content": t.content.strip()[:4000]}
+        for t in payload.history[-8:]
+        if (t.content or "").strip()
+    ]
+    cfg = _dialog_settings(cfg, history)
     tid = trace_buffer.start_trace()
     try:
         with span("api.search", attributes={"trace_id": tid}):
@@ -64,6 +99,7 @@ def api_search(payload: SearchRequest, db: Session = Depends(get_db)) -> SearchR
                 payload.query,
                 top_k=payload.top_k,
                 settings=cfg,
+                history=history or None,
                 space=payload.space,
             )
     except Exception as exc:
@@ -89,6 +125,8 @@ def api_search(payload: SearchRequest, db: Session = Depends(get_db)) -> SearchR
 @router.post("/chat", response_model=ChatResponse)
 def api_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     cfg = settings_as_config(db)
+    history = _history_dicts(payload)
+    cfg = _dialog_settings(cfg, history)
 
     tid = trace_buffer.start_trace()
 
@@ -102,7 +140,11 @@ def api_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespons
         try:
             with span("api.chat.agent", attributes={"trace_id": tid}):
                 runtime = AgentRuntime(db, settings=cfg, persist=True)
-                answer = runtime.handle(payload.query, role="orchestrator")
+                runtime.ctx.dialog_history = history
+                answer = runtime.handle(
+                    _objective_with_history(payload.query, history),
+                    role="orchestrator",
+                )
         except Exception as exc:
             raise HTTPException(503, f"Agent run failed: {exc}") from exc
         return ChatResponse(
@@ -142,6 +184,7 @@ def api_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespons
                 payload.query,
                 top_k=payload.top_k,
                 settings=cfg,
+                history=history or None,
                 space=None if payload.space == "all" else payload.space,
             )
             contexts = [
@@ -153,7 +196,7 @@ def api_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespons
                 }
                 for h in hits
             ]
-            user_prompt = build_rag_prompt(payload.query, contexts)
+            user_prompt = build_rag_prompt(payload.query, contexts, history=history)
             gateway = gateway_for(cfg)
             result = gateway.chat(user_message=user_prompt, system_prompt=SYSTEM_PROMPT)
     except Exception as exc:
@@ -202,11 +245,13 @@ def api_chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> Stre
     tid = trace_buffer.start_trace()
 
     def gen() -> Iterator[str]:
-        yield _sse("start", {"trace_id": tid, "mode": payload.mode})
+        history = _history_dicts(payload)
+        local_cfg = _dialog_settings(cfg, history)
+        yield _sse("start", {"trace_id": tid, "mode": payload.mode, "dialog_turns": len(history)})
         try:
             if payload.top_k is not None:
-                cfg.top_k = payload.top_k
-            cfg.space_filter = None if payload.space == "all" else payload.space
+                local_cfg.top_k = payload.top_k
+            local_cfg.space_filter = None if payload.space == "all" else payload.space
             if payload.mode == "agent":
                 from prism.agents import AgentRuntime
 
@@ -214,6 +259,7 @@ def api_chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> Stre
                 # SSE-emit steps while LLM/tool calls are still in progress.
                 # (Request-scoped `db` is not thread-safe.)
                 events: queue.Queue[tuple[str, Any]] = queue.Queue()
+                objective = _objective_with_history(payload.query, history)
 
                 def _worker() -> None:
                     session = get_session_factory()()
@@ -222,12 +268,17 @@ def api_chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> Stre
                         def _on_step(rec: dict[str, Any]) -> None:
                             events.put(("step", rec))
 
+                        def _on_status(text: str) -> None:
+                            events.put(("status", {"text": text}))
+
                         runtime = AgentRuntime(
                             session,
-                            settings=cfg,
+                            settings=local_cfg,
                             persist=True,
                             on_step=_on_step,
+                            on_status=_on_status,
                         )
+                        runtime.ctx.dialog_history = history
                         events.put(
                             (
                                 "status",
@@ -236,7 +287,7 @@ def api_chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> Stre
                                 },
                             )
                         )
-                        ans = runtime.handle(payload.query, role="orchestrator")
+                        ans = runtime.handle(objective, role="orchestrator")
                         events.put(("done", ans))
                     except Exception as exc:  # noqa: BLE001
                         events.put(("error", exc))
@@ -252,9 +303,20 @@ def api_chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> Stre
                     },
                 )
                 answer = None
+                last_status = "Агент работает…"
                 while True:
-                    kind, payload_evt = events.get()
+                    try:
+                        kind, payload_evt = events.get(timeout=12.0)
+                    except queue.Empty:
+                        yield _sse(
+                            "status",
+                            {
+                                "text": f"{last_status} (модель ещё отвечает, это нормально)…",
+                            },
+                        )
+                        continue
                     if kind == "status":
+                        last_status = str((payload_evt or {}).get("text") or last_status)
                         yield _sse("status", payload_evt)
                     elif kind == "step":
                         step = payload_evt
@@ -264,12 +326,16 @@ def api_chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> Stre
                                 "status",
                                 {"text": "План готов, выполняем инструменты…"},
                             )
+                            last_status = "План готов, выполняем инструменты…"
                         yield _sse("step", step)
                         title = step.get("kind") or "шаг"
-                        yield _sse(
-                            "status",
-                            {"text": f"Агент: шаг {step.get('n', '?')} ({title})…"},
-                        )
+                        phase = (step.get("input") or {}).get("phase")
+                        label = f"Агент: шаг {step.get('n', '?')} ({title}"
+                        if phase:
+                            label += f"/{phase}"
+                        label += ")…"
+                        last_status = label
+                        yield _sse("status", {"text": label})
                     elif kind == "done":
                         answer = payload_evt
                         break
@@ -309,12 +375,18 @@ def api_chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> Stre
                     db,
                     payload.query,
                     top_k=payload.top_k,
-                    settings=cfg,
+                    settings=local_cfg,
+                    history=history or None,
                     space=None if payload.space == "all" else payload.space,
                 )
                 yield _sse(
                     "retrieval",
-                    {"mode": mode, "n": len(hits), "docs": [h.document_name for h in hits[:5]]},
+                    {
+                        "mode": mode,
+                        "n": len(hits),
+                        "docs": [h.document_name for h in hits[:5]],
+                        "dialog": bool(history),
+                    },
                 )
                 yield _sse("status", {"text": "Генерируем ответ по найденному контексту…"})
                 contexts = [
@@ -326,8 +398,8 @@ def api_chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> Stre
                     }
                     for h in hits
                 ]
-                user_prompt = build_rag_prompt(payload.query, contexts)
-                gateway = gateway_for(cfg)
+                user_prompt = build_rag_prompt(payload.query, contexts, history=history)
+                gateway = gateway_for(local_cfg)
                 stream = gateway.chat_stream(
                     user_message=user_prompt,
                     system_prompt=SYSTEM_PROMPT,

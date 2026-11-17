@@ -12,7 +12,12 @@ SYSTEM_PROMPT = (
 )
 
 
-def build_rag_prompt(question: str, contexts: list[dict[str, Any]]) -> str:
+def build_rag_prompt(
+    question: str,
+    contexts: list[dict[str, Any]],
+    *,
+    history: list[dict[str, Any]] | None = None,
+) -> str:
     if not contexts:
         blocks = "(контекст пуст — релевантные фрагменты не найдены)"
     else:
@@ -27,10 +32,23 @@ def build_rag_prompt(question: str, contexts: list[dict[str, Any]]) -> str:
             parts.append(f"[{i}] Источник: {src}{score_s}{section_s}\n{text}")
         blocks = "\n\n".join(parts)
 
+    dialog = ""
+    turns = [
+        t for t in (history or []) if isinstance(t, dict) and (t.get("content") or "").strip()
+    ][-6:]
+    if turns:
+        lines = []
+        for t in turns:
+            role = "Пользователь" if t.get("role") == "user" else "Ассистент"
+            lines.append(f"{role}: {str(t.get('content') or '').strip()[:1200]}")
+        dialog = "Предыдущий диалог:\n" + "\n".join(lines) + "\n\n"
+
     return (
         "Контекст из базы знаний:\n"
         f"{blocks}\n\n"
-        "Вопрос:\n"
+        f"{dialog}"
+        "Текущий вопрос:\n"
         f"{question}\n\n"
-        "Сформулируй ответ с цитатами [n]. Если ответа нет в контексте — откажись."
+        "Сформулируй ответ с цитатами [n]. Учитывай диалог, но опирайся на контекст. "
+        "Если ответа нет в контексте — откажись."
     )

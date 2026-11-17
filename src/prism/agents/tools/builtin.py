@@ -52,6 +52,7 @@ class ToolContext:
         self.set_policy = set_policy
         self.last_hits: list[dict[str, Any]] = []
         self.notes: list[str] = []
+        self.dialog_history: list[dict[str, str]] = []
 
 
 def build_default_registry(ctx: ToolContext) -> ToolRegistry:
@@ -73,11 +74,16 @@ def build_default_registry(ctx: ToolContext) -> ToolRegistry:
             ]
             ctx.last_hits = hits
             return {"hits": hits, "retrieval_mode": "mock", "query": query}
+        settings = ctx.settings
+        history = list(ctx.dialog_history or [])
+        if history and getattr(settings, "rewrite_strategy", "R0") == "R0":
+            settings = settings.model_copy(update={"rewrite_strategy": "R1"})
         hits, mode = retrieve(
             ctx.db,
             query,
             top_k=top_k,
-            settings=ctx.settings,
+            settings=settings,
+            history=history or None,
             space=ctx.settings.space_filter,
         )
         packed = [

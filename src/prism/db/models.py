@@ -156,6 +156,21 @@ class Step(Base):
     run: Mapped[AgentRun] = relationship(back_populates="steps")
 
 
+class ChatDialog(Base):
+    """Persisted chat thread (UI dialog history)."""
+
+    __tablename__ = "chat_dialogs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(256), nullable=False, default="Диалог")
+    messages: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    meta: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class MemoryEntry(Base):
     """Layered memory: profile / journal / project. Soft supersede, no hard delete."""
 

@@ -368,7 +368,7 @@ class LLMGateway:
                     data = json.loads(line)
                     if data.get("error"):
                         raise RuntimeError(f"Ollama stream error: {data['error']}")
-                    piece = ((data.get("message") or {}).get("content") or "")
+                    piece = (data.get("message") or {}).get("content") or ""
                     if piece:
                         parts.append(piece)
                         yield piece
@@ -416,7 +416,9 @@ class LLMGateway:
         tokens_in = 0
         tokens_out = 0
         with httpx.Client(timeout=httpx.Timeout(300.0, connect=10.0)) as client:
-            with client.stream("POST", f"{base}/chat/completions", headers=headers, json=body) as resp:
+            with client.stream(
+                "POST", f"{base}/chat/completions", headers=headers, json=body
+            ) as resp:
                 if resp.status_code >= 400:
                     detail = resp.read().decode("utf-8", errors="replace")
                     raise RuntimeError(f"OpenAI {resp.status_code}: {detail}")
