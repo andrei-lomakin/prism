@@ -54,6 +54,11 @@ def save_settings(db: Session, update: SettingsUpdate) -> SettingsOut:
         from prism.rag.embeddings.base import clear_embedder_cache
 
         clear_embedder_cache()
+    llm_keys = ("llm_provider", "llm_model", "ollama_base_url")
+    if any(k in patch for k in llm_keys):
+        from prism.llm.gateway import clear_llm_cache
+
+        clear_llm_cache()
     if "vector_search" in patch:
         from prism.db.session import get_engine
         from prism.rag.index.vector_ann import ensure_vector_index

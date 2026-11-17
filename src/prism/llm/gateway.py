@@ -69,11 +69,26 @@ class _LRUCache:
         while len(self._data) > self.maxsize:
             self._data.popitem(last=False)
 
+    def clear(self) -> None:
+        self._data.clear()
+
+
+# Process-wide prompt cache (Variant B lite). Key already includes
+# provider|model|temperature|system|user, so per-request LLMGateway(cfg)
+# still hits. Not Redis — dies with the worker/API process.
+_SHARED_CACHE = _LRUCache(maxsize=256)
+
+
+def clear_llm_cache() -> None:
+    """Drop in-process LLM responses (call after model/provider change)."""
+    _SHARED_CACHE.clear()
+    get_gateway.cache_clear()
+
 
 class LLMGateway:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
-        self._cache = _LRUCache()
+        self._cache = _SHARED_CACHE
 
     def chat(
         self,
@@ -249,4 +264,12 @@ class LLMGateway:
 
 @lru_cache
 def get_gateway() -> LLMGateway:
+    """Process singleton with env defaults. Prefer ``LLMGateway(cfg)`` when
+    request settings differ — prompt cache is shared either way.
+    """
     return LLMGateway()
+
+
+def gateway_for(settings: Settings | None = None) -> LLMGateway:
+    """Build a gateway bound to ``settings``; responses use ``_SHARED_CACHE``."""
+    return LLMGateway(settings)

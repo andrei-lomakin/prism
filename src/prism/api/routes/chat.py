@@ -24,7 +24,7 @@ from prism.api.schemas import (
 )
 from prism.api.settings_store import settings_as_config
 from prism.db.session import get_db, get_session_factory
-from prism.llm import LLMGateway
+from prism.llm import gateway_for
 from prism.observability import span, trace_buffer
 from prism.rag.generate import SYSTEM_PROMPT, build_rag_prompt, check_grounding
 from prism.rag.retrieve import retrieve
@@ -137,7 +137,7 @@ def api_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespons
                 for h in hits
             ]
             user_prompt = build_rag_prompt(payload.query, contexts)
-            gateway = LLMGateway(cfg)
+            gateway = gateway_for(cfg)
             result = gateway.chat(user_message=user_prompt, system_prompt=SYSTEM_PROMPT)
     except Exception as exc:
         raise HTTPException(503, f"RAG chat failed: {exc}") from exc
@@ -301,7 +301,7 @@ def api_chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> Stre
                     for h in hits
                 ]
                 user_prompt = build_rag_prompt(payload.query, contexts)
-                gateway = LLMGateway(cfg)
+                gateway = gateway_for(cfg)
                 result = gateway.chat(user_message=user_prompt, system_prompt=SYSTEM_PROMPT)
                 text = result.text or ""
                 for i in range(0, len(text), 48):

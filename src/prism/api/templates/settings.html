@@ -120,13 +120,14 @@
 
     <div class="field">
       <div class="field-head">
-        <span class="field-title">Реранжирование</span>
-        <button type="button" class="tip" aria-label="Подсказка: реранк" data-tip>
+        <span class="field-title">Реранкинг</span>
+        <button type="button" class="tip" aria-label="Подсказка: реранкинг" data-tip>
           ?
           <span class="tip-pop" role="tooltip">
-            После первичного поиска cross-encoder ещё раз переупорядочивает кандидатов.
-            Обычно чуть точнее, но медленнее (нужна модель реранкера).
-            На прогоны в разделе «Оценка» не влияет — там свой YAML.
+            После обычного поиска отдельная модель ещё раз сравнивает
+            вопрос с каждым найденным фрагментом и меняет их порядок.
+            Обычно чуть точнее, но медленнее. На «Оценку» не влияет —
+            там свой конфиг.
           </span>
         </button>
       </div>
@@ -138,8 +139,19 @@
             <span class="switch-text" id="rerank-label">{% if settings.rerank_enabled %}вкл{% else %}выкл{% endif %}</span>
           </label>
         </div>
-        <label class="settings-candidates">
-          Кандидатов в пул
+        <label class="settings-candidates" for="rerank_candidates">
+          <span class="settings-candidates-label">
+            Кандидатов
+            <button type="button" class="tip tip-tight" aria-label="Подсказка: кандидаты реранкинга" data-tip>
+              ?
+              <span class="tip-pop tip-pop-end" role="tooltip">
+                Сколько лучших фрагментов из поиска отдать модели
+                реранкинга на повторную проверку. Чем больше число —
+                тем шире проверка и тем медленнее ответ. В итоге
+                в ответ всё равно попадёт только top‑k.
+              </span>
+            </button>
+          </span>
           <input type="number" name="rerank_candidates" id="rerank_candidates"
             value="{{ settings.rerank_candidates }}" min="5" max="100"
             {% if not settings.rerank_enabled %}disabled{% endif %} />
