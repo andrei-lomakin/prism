@@ -13,6 +13,22 @@ def test_citations_missing():
     assert report.missing == [3]
 
 
+def test_no_citations_fails_when_sources_exist():
+    report = check_grounding(
+        "Hybrid лучше dense, поверьте.",
+        ["Hybrid combines dense and lexical retrieval."],
+    )
+    assert not report.ok
+    assert report.requires_citation
+    assert report.cited == []
+
+
+def test_no_sources_allows_uncited_answer():
+    report = check_grounding("Не знаю.", [])
+    assert report.ok
+    assert not report.requires_citation
+
+
 def test_grounding_number_in_cited_chunk():
     report = check_grounding(
         "RRF uses k=60 [1].",

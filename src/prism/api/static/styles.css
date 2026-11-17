@@ -68,9 +68,40 @@ input, textarea, select {
 .sources { margin-top: 1rem; display: grid; gap: .6rem; }
 .source {
   border: 1px solid var(--line); border-radius: 8px; padding: .75rem;
-  background: #fff; font-size: .92rem;
+  background: #fff; font-size: .92rem; cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+.source:hover, .source:focus-visible {
+  border-color: var(--accent); background: #f3faf7; outline: none;
 }
 .source .meta { color: var(--muted); font-size: .8rem; margin-bottom: .35rem; }
+.answer .cite-ref {
+  display: inline-block; margin: 0 .1rem; padding: 0 .35rem;
+  border-radius: 4px; background: #d8efe7; color: #0c584c;
+  font-weight: 700; font-size: .85em; text-decoration: none;
+  cursor: pointer; border: 1px solid #b7ddd2;
+}
+.answer .cite-ref:hover { background: #c5e8dc; }
+.cite-drawer {
+  position: fixed; right: 1rem; bottom: 1rem; top: auto;
+  width: min(420px, calc(100vw - 2rem)); max-height: min(70vh, 560px);
+  display: flex; flex-direction: column;
+  background: #fffdf8; border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(30, 24, 12, .18); z-index: 50; padding: .85rem 1rem;
+}
+.cite-drawer.hidden { display: none; }
+.cite-drawer-head {
+  display: flex; justify-content: space-between; align-items: center; gap: .5rem;
+  margin-bottom: .35rem;
+}
+.cite-drawer-body {
+  overflow: auto; flex: 1; margin-top: .5rem; padding: .75rem;
+  background: #eef7f4; border: 1px solid #cfe6df; border-radius: 8px;
+  white-space: pre-wrap; font-size: .92rem; line-height: 1.45;
+}
+.cite-drawer-body mark {
+  background: #ffe08a; color: inherit; padding: .05rem .15rem; border-radius: 3px;
+}
 .hidden { display: none; }
 .doc-row {
   display: flex; justify-content: space-between; gap: .75rem;

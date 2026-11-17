@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -11,6 +12,8 @@ from prism.agents.policy.audit import AuditLog
 from prism.agents.policy.rules import Mode, PolicyBundle, load_policy
 from prism.agents.tools import ToolSpec
 from prism.observability import span
+
+_BLOB_PARAM_NAMES = frozenset({"args", "payload", "params"})
 
 DecisionMode = Mode
 
@@ -124,10 +127,8 @@ class ActionGate:
                 )
 
         try:
-            output = tool.execute(**args) if args else tool.execute()
-        except TypeError:
-            output = tool.execute(args)
-        except Exception as exc:  # noqa: BLE001 — audited
+            output = invoke_tool(tool.execute, args)
+        except Exception as exc:  # noqa: BLE001 — audited; never retry
             self.audit.record(
                 run_id=run_id,
                 tool=tool.code,
@@ -150,6 +151,29 @@ class ActionGate:
             result_summary=summary,
         )
         return GateResult(decision=decision, executed=True, output=output)
+
+
+def invoke_tool(execute: Callable[..., Any], args: dict[str, Any]) -> Any:
+    """Bind args to the tool signature *before* calling. No exception-driven retry."""
+    sig = inspect.signature(execute)
+    params = list(sig.parameters.values())
+
+    # Legacy: single blob param `def tool(args|payload|params): ...`
+    if (
+        len(params) == 1
+        and params[0].kind
+        in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        and params[0].name in _BLOB_PARAM_NAMES
+        and params[0].name not in args
+    ):
+        return execute(args)
+
+    try:
+        bound = sig.bind(**args) if args else sig.bind()
+    except TypeError as exc:
+        raise TypeError(f"tool args mismatch for {execute!r}: {exc}") from exc
+    bound.apply_defaults()
+    return execute(*bound.args, **bound.kwargs)
 
 
 def _summarize(output: Any) -> str:

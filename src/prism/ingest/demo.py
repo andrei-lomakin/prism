@@ -37,7 +37,7 @@ def _find_demo_doc(db, doc_key: str, filename: str) -> Document | None:
     return None
 
 
-def ingest_demo_corpus(*, space: str = "shared") -> dict:
+def ingest_demo_corpus(*, space: str = "shared", force_reindex: bool = False) -> dict:
     init_db()
     settings = get_settings()
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
@@ -90,7 +90,7 @@ def ingest_demo_corpus(*, space: str = "shared") -> dict:
             db.commit()
             db.refresh(job)
             try:
-                run_ingest(db, job.id)
+                run_ingest(db, job.id, force_reindex=force_reindex)
             except Exception:
                 failed += 1
                 logger.exception("demo ingest failed for %s", path.name)

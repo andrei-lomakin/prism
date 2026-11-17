@@ -1,5 +1,9 @@
 # Prism
 
+<p align="center">
+  <img src="assets/prism_logo.jpg" alt="Призма — ваша персональная команда помощников" width="720"/>
+</p>
+
 **Diploma project** — a personal research assistant over a private knowledge base.
 
 Prism combines a transparent **RAG** pipeline with a **multi-agent** orchestration layer. You upload documents and links, ask a question or set a research goal, and the system retrieves evidence, optionally delegates specialist agents, and returns an answer with citations. Every stage is measurable: retrieval quality, generation faithfulness, latency, and cost.

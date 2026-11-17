@@ -7,12 +7,18 @@ Why templates (not live LLM generation) for the seed set:
 
 Expansion to 200+ items uses controlled paraphrase patterns per seed fact.
 Manual review flag marks the primary hand-checked subset (≥30).
+
+**Split rule (anti-leak):** assign whole *families* to dev or test.
+A family = seed key cognates (strip ``_en``/``_ru``) + all their paraphrases.
+Prefix paraphrases are volume, not independent tasks — never split a family
+across dev/test. Prefer extra hand-written ``control`` items for held-out variety.
 """
 
 from __future__ import annotations
 
 import json
 import random
+import re
 from pathlib import Path
 
 from prism.eval.schema import GoldenQuestion, RelevantDoc
@@ -23,6 +29,18 @@ OUT_DIR = ROOT / "data" / "golden"
 
 def _rd(*pairs: tuple[str, str | None]) -> list[RelevantDoc]:
     return [RelevantDoc(doc_key=k, section=s) for k, s in pairs]
+
+
+def family_of(key: str) -> str:
+    """Group bilingual cognates: ``f_rag_def_en`` / ``f_rag_def_ru`` → ``f_rag_def``."""
+    for suf in ("_en", "_ru"):
+        if key.endswith(suf):
+            return key[: -len(suf)]
+    return key
+
+
+def _norm_q(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip().lower())
 
 
 # Seed facts: (id_prefix, lang, type, question, answer, docs, reviewed, notes)
@@ -391,82 +409,197 @@ def _seeds() -> list[dict]:
     return s
 
 
+def _controls() -> list[dict]:
+    """Hand-written controls — not prefix paraphrases; own families for held-out signal."""
+    return [
+        {
+            "key": "ctrl_rrf_meaning_en",
+            "language": "en",
+            "type": "factoid",
+            "question": "Why does Reciprocal Rank Fusion down-weight lower ranks when merging dense and BM25 lists?",
+            "gold_answer": "RRF adds 1/(k+rank) per list so top ranks dominate and lower ranks contribute less, without needing calibrated scores.",
+            "docs": _rd(("07_hybrid_search_en", "Hybrid Fusion")),
+            "reviewed": True,
+            "notes": "hand-written control (not a prefix paraphrase)",
+            "expandable": False,
+        },
+        {
+            "key": "ctrl_fail_closed_ru",
+            "language": "ru",
+            "type": "factoid",
+            "question": "Почему для неизвестного tool в агенте выбирают ask, а не тихий auto-allow?",
+            "gold_answer": "Fail-closed: неизвестный side-effect нельзя исполнять молча; ask требует одобрения до вызова.",
+            "docs": _rd(("14_agents_ru", "Policy-гейт инструментов")),
+            "reviewed": True,
+            "notes": "hand-written control (not a prefix paraphrase)",
+            "expandable": False,
+        },
+        {
+            "key": "ctrl_doc_key_en",
+            "language": "en",
+            "type": "factoid",
+            "question": "Why do golden relevance labels use doc_key instead of chunk_id?",
+            "gold_answer": "Chunk ids change when re-chunking; doc_key (+ optional section) keeps labels stable across indexing strategies.",
+            "docs": _rd(("11_eval_metrics_en", "Retrieval Metrics")),
+            "reviewed": True,
+            "notes": "hand-written control (not a prefix paraphrase)",
+            "expandable": False,
+        },
+        {
+            "key": "ctrl_packer_budget_en",
+            "language": "en",
+            "type": "comparison",
+            "question": "What trade-off does limiting max_per_doc in context packing address versus taking the top scores blindly?",
+            "gold_answer": "max_per_doc trades pure score order for diversity so one long document does not monopolize the context window.",
+            "docs": _rd(("08_hybrid_search_ru", "Упаковка контекста")),
+            "reviewed": True,
+            "notes": "hand-written control (not a prefix paraphrase)",
+            "expandable": False,
+        },
+        {
+            "key": "ctrl_unans_stock_en",
+            "language": "en",
+            "type": "unanswerable",
+            "question": "What was Prism's closing share price on NASDAQ last Friday?",
+            "gold_answer": "The knowledge base has no answer to this question.",
+            "docs": [],
+            "reviewed": True,
+            "notes": "hand-written control (not a prefix paraphrase)",
+            "expandable": False,
+        },
+        {
+            "key": "ctrl_multihop_gate_budget_en",
+            "language": "en",
+            "type": "multi-hop",
+            "question": "If a web_search tool is unknown to policy and the run is near its step budget, what two mechanisms constrain the agent?",
+            "gold_answer": "ActionGate fails closed to ask for the unknown tool, and budget limits force partial synthesis when steps/tokens/cost/time are exhausted.",
+            "docs": _rd(
+                ("13_agents_en", "Tool Policy Gate"),
+                ("14_agents_ru", "Машина состояний рана"),
+            ),
+            "reviewed": True,
+            "notes": "hand-written control (not a prefix paraphrase)",
+            "expandable": False,
+        },
+    ]
+
+
+# Volume expanders only — still same family as the seed (not independent tasks).
 _PARAPHRASE_EN = [
     "In one sentence: {q}",
     "Briefly explain: {q}",
     "According to the docs, {q}",
     "From the knowledge base: {q}",
+    "Using only the corpus: {q}",
+    "For the ablation write-up: {q}",
+    "Answer with citations in mind: {q}",
+    "State the grounded answer: {q}",
 ]
 _PARAPHRASE_RU = [
     "Кратко: {q}",
     "По материалам базы: {q}",
     "Одним абзацем ответь: {q}",
     "Сформулируй ответ: {q}",
+    "Только по корпусу: {q}",
+    "Для отчёта по абляции: {q}",
+    "С опорой на источники: {q}",
+    "Дай обоснованный ответ: {q}",
 ]
 
 
 def expand_seeds(
-    seeds: list[dict], *, target: int = 240, rng: random.Random | None = None
+    seeds: list[dict],
+    *,
+    target: int = 240,
+    rng: random.Random | None = None,
+    controls: list[dict] | None = None,
 ) -> list[GoldenQuestion]:
-    """Expand seeds with paraphrases while keeping type quotas.
+    """Expand expandable seeds with paraphrases; keep type quotas; dedupe question text.
 
     Quotas (TZ Stage 1): unanswerable ≥10%, multi-hop ≥15%.
     """
     rng = rng or random.Random(42)
+    controls = controls if controls is not None else _controls()
     items: list[GoldenQuestion] = []
-    for seed in seeds:
+    seen_q: set[str] = set()
+
+    def _append(q: GoldenQuestion) -> bool:
+        nq = _norm_q(q.question)
+        if nq in seen_q:
+            return False
+        q.validate_consistency()
+        seen_q.add(nq)
+        items.append(q)
+        return True
+
+    for seed in list(seeds) + list(controls):
+        fam = seed.get("family") or family_of(seed["key"])
         q = GoldenQuestion(
             id=f"seed_{seed['key']}",
             question=seed["question"],
             language=seed["language"],
             type=seed["type"],
-            relevant_docs=seed["docs"],
+            relevant_docs=list(seed["docs"]),
             gold_answer=seed["gold_answer"],
-            split="dev",  # temporary; assigned later
+            split="dev",  # temporary; assigned later by family
             reviewed=bool(seed.get("reviewed", False)),
             notes=seed.get("notes", "primary seed"),
+            family=fam,
         )
-        q.validate_consistency()
-        items.append(q)
+        _append(q)
 
+    expandable = [s for s in seeds if s.get("expandable", True)]
     by_type: dict[str, list[dict]] = {}
-    for seed in seeds:
+    for seed in expandable:
         by_type.setdefault(seed["type"], []).append(seed)
 
     min_unans = max(1, int(target * 0.12))
     min_multi = max(1, int(target * 0.18))
     para_i = 0
 
-    def add_para(seed: dict) -> None:
+    def add_para(seed: dict) -> bool:
         nonlocal para_i
         templates = _PARAPHRASE_EN if seed["language"] == "en" else _PARAPHRASE_RU
-        tmpl = rng.choice(templates)
+        order = list(templates)
+        rng.shuffle(order)
         qtext = seed["question"]
-        question = tmpl.format(q=qtext[0].lower() + qtext[1:])
-        pq = GoldenQuestion(
-            id=f"para_{seed['key']}_{para_i:03d}",
-            question=question,
-            language=seed["language"],
-            type=seed["type"],
-            relevant_docs=list(seed["docs"]),
-            gold_answer=seed["gold_answer"],
-            split="dev",
-            reviewed=False,
-            notes="controlled paraphrase of seed; pending secondary review",
-        )
-        pq.validate_consistency()
-        items.append(pq)
-        para_i += 1
+        body = qtext[0].lower() + qtext[1:] if qtext else qtext
+        fam = seed.get("family") or family_of(seed["key"])
+        for tmpl in order:
+            question = tmpl.format(q=body)
+            pq = GoldenQuestion(
+                id=f"para_{seed['key']}_{para_i:03d}",
+                question=question,
+                language=seed["language"],
+                type=seed["type"],
+                relevant_docs=list(seed["docs"]),
+                gold_answer=seed["gold_answer"],
+                split="dev",
+                reviewed=False,
+                notes="controlled paraphrase of seed; same family; pending secondary review",
+                family=fam,
+            )
+            if _append(pq):
+                para_i += 1
+                return True
+        return False
 
     # Fill quota types first
-    while sum(1 for x in items if x.type == "unanswerable") < min_unans:
+    guard = 0
+    while sum(1 for x in items if x.type == "unanswerable") < min_unans and guard < target * 5:
         add_para(rng.choice(by_type["unanswerable"]))
-    while sum(1 for x in items if x.type == "multi-hop") < min_multi:
+        guard += 1
+    guard = 0
+    while sum(1 for x in items if x.type == "multi-hop") < min_multi and guard < target * 5:
         add_para(rng.choice(by_type["multi-hop"]))
+        guard += 1
 
-    # Fill remaining with mixed paraphrases
-    while len(items) < target:
-        add_para(rng.choice(seeds))
+    guard = 0
+    while len(items) < target and guard < target * 10:
+        if not add_para(rng.choice(expandable)):
+            # exhausted unique paraphrases for a seed — try another
+            pass
+        guard += 1
 
     return items[:target]
 
@@ -474,16 +607,41 @@ def expand_seeds(
 def assign_splits(
     items: list[GoldenQuestion], *, test_ratio: float = 0.3, rng: random.Random | None = None
 ) -> None:
-    """Stratified-ish split by type; hyperparameters must not be tuned on test."""
+    """Split by *family* (stratified by type). Never put paraphrases of one seed across splits."""
     rng = rng or random.Random(42)
-    by_type: dict[str, list[GoldenQuestion]] = {}
+    families: dict[str, list[GoldenQuestion]] = {}
     for it in items:
-        by_type.setdefault(it.type, []).append(it)
-    for group in by_type.values():
-        rng.shuffle(group)
-        n_test = max(1, int(len(group) * test_ratio))
-        for i, it in enumerate(group):
-            it.split = "test" if i < n_test else "dev"
+        fam = it.family or it.id
+        it.family = fam
+        families.setdefault(fam, []).append(it)
+
+    by_type: dict[str, list[str]] = {}
+    for fam, members in families.items():
+        by_type.setdefault(members[0].type, []).append(fam)
+
+    test_families: set[str] = set()
+    for fams in by_type.values():
+        rng.shuffle(fams)
+        if len(fams) == 1:
+            # Keep singleton family on dev so ablations still see the type.
+            continue
+        n_test = max(1, int(len(fams) * test_ratio))
+        n_test = min(n_test, len(fams) - 1)
+        test_families.update(fams[:n_test])
+
+    for fam, members in families.items():
+        split = "test" if fam in test_families else "dev"
+        for it in members:
+            it.split = split
+
+
+def assert_no_family_leak(items: list[GoldenQuestion]) -> None:
+    by_fam: dict[str, set[str]] = {}
+    for it in items:
+        by_fam.setdefault(it.family or it.id, set()).add(it.split)
+    leaks = {f: sp for f, sp in by_fam.items() if len(sp) > 1}
+    if leaks:
+        raise AssertionError(f"family split leak: {sorted(leaks)[:10]}")
 
 
 def write_jsonl(items: list[GoldenQuestion], path: Path) -> None:
@@ -495,8 +653,10 @@ def write_jsonl(items: list[GoldenQuestion], path: Path) -> None:
 
 def build(target: int = 240) -> dict:
     seeds = _seeds()
-    items = expand_seeds(seeds, target=target)
+    controls = _controls()
+    items = expand_seeds(seeds, target=target, controls=controls)
     assign_splits(items)
+    assert_no_family_leak(items)
     for it in items:
         it.validate_consistency()
 
@@ -511,9 +671,11 @@ def build(target: int = 240) -> dict:
 
         return {
             "n": len(xs),
+            "families": len({x.family for x in xs}),
             "by_type": dict(Counter(x.type for x in xs)),
             "by_lang": dict(Counter(x.language for x in xs)),
             "reviewed": sum(1 for x in xs if x.reviewed),
+            "controls": sum(1 for x in xs if "hand-written control" in (x.notes or "")),
             "unanswerable_pct": round(
                 100 * sum(1 for x in xs if x.type == "unanswerable") / max(1, len(xs)), 1
             ),
@@ -525,9 +687,17 @@ def build(target: int = 240) -> dict:
     summary = {
         "total": len(items),
         "seeds": len(seeds),
+        "controls": len(controls),
+        "families": len({i.family for i in items}),
+        "split_unit": "family",
         "dev": stats(dev),
         "test": stats(test),
         "all": stats(items),
+        "notes": (
+            "Prefix paraphrases share seed family with the original; "
+            "dev/test split is by family (no cross-split leak). "
+            "Controls are independently worded, not template wraps."
+        ),
     }
     (OUT_DIR / "stats.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"

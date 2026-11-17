@@ -5,39 +5,96 @@
   <h1>Настройки RAG / LLM</h1>
   <p class="lede muted">Параметры по умолчанию для поиска и генерации. Сохраняются в БД поверх <code>.env</code>.</p>
   <form id="settings-form" class="stack">
-    <label>Модель эмбеддингов
-      <input name="embedding_model" value="{{ settings.embedding_model }}" />
-    </label>
-    <label>Стратегия нарезки (C1–C3)
-      <select name="chunking_strategy">
-        {% for c in ['C1','C2','C3'] %}
-        <option value="{{ c }}" {% if settings.chunking_strategy == c %}selected{% endif %}>{{ c }}</option>
-        {% endfor %}
+    <div class="field">
+      <div class="field-head">
+        <span class="field-title">Модель эмбеддингов</span>
+        <button type="button" class="tip" aria-label="Подсказка: эмбеддинги" data-tip>
+          ?
+          <span class="tip-pop" role="tooltip">
+            Модель, которая переводит текст куска в числовой вектор для поиска по смыслу.
+            В списке только варианты с размерностью 384 — как колонка в базе.
+            После смены нужна полная переиндексация документов.
+          </span>
+        </button>
+      </div>
+      {% set emb = settings.embedding_model %}
+      {% set emb_known = [
+        'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
+        'sentence-transformers/all-MiniLM-L6-v2'
+      ] %}
+      <select name="embedding_model" id="embedding_model">
+        {% if emb not in emb_known %}
+        <option value="{{ emb }}" selected>{{ emb }} (текущая)</option>
+        {% endif %}
+        <option value="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+          {% if emb == 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2' %}selected{% endif %}>
+          MiniLM-L12 (русский и английский)
+        </option>
+        <option value="sentence-transformers/all-MiniLM-L6-v2"
+          {% if emb == 'sentence-transformers/all-MiniLM-L6-v2' %}selected{% endif %}>
+          MiniLM-L6 (английский)
+        </option>
       </select>
-    </label>
-    <div class="row">
-      <label>Размер фрагмента <input type="number" name="chunk_size" value="{{ settings.chunk_size }}" /></label>
-      <label>Перекрытие <input type="number" name="chunk_overlap" value="{{ settings.chunk_overlap }}" /></label>
-      <label>Фрагментов (top_k) <input type="number" name="top_k" value="{{ settings.top_k }}" /></label>
     </div>
-    <label>Режим поиска
-      <select name="retrieval_mode">
-        <option value="dense" {% if settings.retrieval_mode == 'dense' %}selected{% endif %}>Векторный (dense)</option>
-        <option value="lexical" {% if settings.retrieval_mode == 'lexical' %}selected{% endif %}>Лексический (BM25)</option>
-        <option value="hybrid" {% if settings.retrieval_mode == 'hybrid' %}selected{% endif %}>Гибридный</option>
+
+    <div class="field">
+      <div class="field-head">
+        <span class="field-title">Стратегия нарезки на фрагменты</span>
+        <button type="button" class="tip" aria-label="Подсказка: нарезка" data-tip>
+          ?
+          <span class="tip-pop" role="tooltip">
+            Как документ режется на куски перед поиском.
+            Если сменили способ — документы нужно проиндексировать заново.
+          </span>
+        </button>
+      </div>
+      <select name="chunking_strategy" id="chunking_strategy">
+        <option value="C1" {% if settings.chunking_strategy == 'C1' %}selected{% endif %}>C1 (чанки из набора слов)</option>
+        <option value="C2" {% if settings.chunking_strategy == 'C2' %}selected{% endif %}>C2 (чанки из абзацев)</option>
+        <option value="C3" {% if settings.chunking_strategy == 'C3' %}selected{% endif %}>C3 (чанки из законченных предложений)</option>
+        <option value="C4" {% if settings.chunking_strategy == 'C4' %}selected{% endif %}>C4 (рекурсия: абзацы, предложения, слова)</option>
+        <option value="C5" {% if settings.chunking_strategy == 'C5' %}selected{% endif %}>C5 (структура организации документа)</option>
+        <option value="C6" {% if settings.chunking_strategy == 'C6' %}selected{% endif %}>C6 (по сходству Жаккара)</option>
+        <option value="C7" {% if settings.chunking_strategy == 'C7' %}selected{% endif %}>C7 (с иерархией чанков)</option>
       </select>
-    </label>
+    </div>
+
+    <div class="row">
+      <label title="Ориентир длины куска (потом переводится в символы)">Размер фрагмента <input type="number" name="chunk_size" value="{{ settings.chunk_size }}" /></label>
+      <label title="Насколько соседние куски пересекаются">Перекрытие <input type="number" name="chunk_overlap" value="{{ settings.chunk_overlap }}" /></label>
+      <label title="Сколько кусков отдавать в поиск или в ответ">Число фрагментов <input type="number" name="top_k" value="{{ settings.top_k }}" /></label>
+    </div>
+
+    <div class="field">
+      <div class="field-head">
+        <span class="field-title">Режим поиска</span>
+        <button type="button" class="tip" aria-label="Подсказка: поиск" data-tip>
+          ?
+          <span class="tip-pop" role="tooltip">
+            <b>По смыслу</b> — сравнивает числовые векторы кусков и вопроса.<br/>
+            <b>По словам</b> — ищет совпадения слов и словоформ, как классический поиск.<br/>
+            <b>Смешанный</b> — объединяет оба списка результатов.
+          </span>
+        </button>
+      </div>
+      <select name="retrieval_mode" id="retrieval_mode">
+        <option value="dense" {% if settings.retrieval_mode == 'dense' %}selected{% endif %}>По смыслу (векторы)</option>
+        <option value="lexical" {% if settings.retrieval_mode == 'lexical' %}selected{% endif %}>По словам (BM25-индекс)</option>
+        <option value="hybrid" {% if settings.retrieval_mode == 'hybrid' %}selected{% endif %}>Смешанный (смысл + слова)</option>
+      </select>
+    </div>
+
     <label>Адрес Ollama
       <input name="ollama_base_url" id="ollama_base_url" value="{{ settings.ollama_base_url }}" />
     </label>
     <div class="field">
       <div class="field-head">
-        <span class="field-title">Модель LLM (Ollama)</span>
-        <button type="button" class="tip" aria-label="Подсказка: модель" data-tip>
+        <span class="field-title">Языковая модель для ответа</span>
+        <button type="button" class="tip" aria-label="Подсказка: модель ответа" data-tip>
           ?
           <span class="tip-pop" role="tooltip">
-            Список берётся с Ollama (<code>/api/tags</code>). Сначала сохрани адрес Ollama,
-            если менял — затем «Обновить список».
+            Список берётся с запущенного Ollama. Если меняли адрес — сначала сохраните его,
+            затем нажмите «Обновить список».
           </span>
         </button>
       </div>
@@ -99,9 +156,9 @@
         opt.textContent = prev + ' (нет на сервере)';
         opt.selected = true;
         sel.prepend(opt);
-        hint.textContent = `Текущая «${prev}» не найдена в Ollama. Выберите из списка или: ollama pull ${prev}`;
+        hint.textContent = `Текущая «${prev}» не найдена в Ollama. Выберите из списка или скачайте её.`;
       } else {
-        hint.textContent = `Доступно моделей: ${models.length} · ${data.ollama_base_url || ''}`;
+        hint.textContent = `Доступно на Ollama: ${models.length}`;
       }
     } catch (err) {
       hint.textContent = String(err.message || err);

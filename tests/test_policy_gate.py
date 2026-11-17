@@ -58,6 +58,63 @@ def test_ask_runs_with_approval_fn():
     assert result.executed is True
 
 
+def test_inner_typeerror_does_not_retry_execute():
+    """Regression: catching TypeError to pick call style must not re-run the tool."""
+    calls = {"n": 0}
+
+    def boom(query: str) -> dict:
+        calls["n"] += 1
+        raise TypeError("NoneType inside tool body")
+
+    gate = ActionGate(load_policy())
+    tool = ToolSpec(
+        code="search_kb",
+        category="retrieval",
+        side_effect="read",
+        schema={},
+        execute=boom,
+    )
+    result = gate.execute(run=None, tool=tool, args={"query": "x"})
+    assert result.executed is False
+    assert "NoneType inside tool body" in (result.error or "")
+    assert calls["n"] == 1
+
+
+def test_args_mismatch_never_calls_tool():
+    calls = {"n": 0}
+
+    def only_query(query: str) -> dict:
+        calls["n"] += 1
+        return {"ok": True}
+
+    gate = ActionGate(load_policy())
+    tool = ToolSpec(
+        code="search_kb",
+        category="retrieval",
+        side_effect="read",
+        schema={},
+        execute=only_query,
+    )
+    result = gate.execute(run=None, tool=tool, args={"q": "wrong key"})
+    assert result.executed is False
+    assert "tool args mismatch" in (result.error or "")
+    assert calls["n"] == 0
+
+
+def test_blob_args_param_still_supported():
+    gate = ActionGate(load_policy())
+    tool = ToolSpec(
+        code="search_kb",
+        category="retrieval",
+        side_effect="read",
+        schema={},
+        execute=lambda args: {"got": args},
+    )
+    result = gate.execute(run=None, tool=tool, args={"query": "x"})
+    assert result.executed is True
+    assert result.output == {"got": {"query": "x"}}
+
+
 def test_locked_rule_cannot_weaken():
     # Locked ask cannot be weakened to auto via agent overlay.
     locked = merge_rules(

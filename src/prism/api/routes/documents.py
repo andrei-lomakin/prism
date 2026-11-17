@@ -48,11 +48,11 @@ def _doc_out(d: Document) -> DocumentOut:
     )
 
 
-async def _enqueue(job_id: int) -> None:
+async def _enqueue(job_id: int, *, force_reindex: bool = False) -> None:
     settings = get_settings()
     redis = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     try:
-        await redis.enqueue_job("ingest_document", job_id)
+        await redis.enqueue_job("ingest_document", job_id, force_reindex=force_reindex)
     finally:
         await redis.close()
 
@@ -189,6 +189,33 @@ def list_chunks(
             for c in rows
         ],
     }
+
+
+@router.post("/documents/{document_id}/reindex", response_model=UploadResponse)
+async def reindex_document(
+    document_id: int,
+    force: bool = True,
+    db: Session = Depends(get_db),
+) -> UploadResponse:
+    """Queue re-ingest. Default force=True so pipeline/config changes always apply."""
+    doc = db.get(Document, document_id)
+    if doc is None:
+        raise HTTPException(404, "Document not found")
+    if doc.status in ("pending", "indexing"):
+        raise HTTPException(409, "Indexing already in progress")
+    job = Job(
+        document_id=doc.id,
+        kind="ingest",
+        status="queued",
+        progress=0,
+        current_step="queued",
+    )
+    doc.status = "pending"
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    await _enqueue(job.id, force_reindex=force)
+    return UploadResponse(document_id=doc.id, job_id=job.id)
 
 
 @router.delete("/documents/{document_id}")

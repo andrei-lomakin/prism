@@ -1,4 +1,15 @@
 const PrismApp = {
+  _lastCitations: [],
+
+  _escapeAttr(s) {
+    return String(s ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  },
+
   _escape(s) {
     return String(s ?? '')
       .replace(/&/g, '&amp;')
@@ -155,18 +166,79 @@ const PrismApp = {
     return li;
   },
 
+  _renderAnswerHtml(text) {
+    const escaped = this._escape(text || '');
+    return escaped.replace(/\[(\d+)\]/g, (_, n) =>
+      `<a href="#cite-${n}" class="cite-ref" data-cite="${n}" title="Открыть источник [${n}]">[${n}]</a>`
+    );
+  },
+
+  _bindAnswerCitationClicks(answerEl) {
+    if (!answerEl) return;
+    answerEl.querySelectorAll('[data-cite]').forEach((el) => {
+      el.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.openCitation(Number(el.getAttribute('data-cite')));
+      });
+    });
+  },
+
   _showAnswer(text) {
     const { answer } = this._els();
     if (!answer) return;
     answer.classList.remove('hidden');
-    answer.textContent = text || '';
+    answer.innerHTML = this._renderAnswerHtml(text);
+    this._bindAnswerCitationClicks(answer);
   },
 
   _appendAnswer(text) {
     const { answer } = this._els();
     if (!answer) return;
     answer.classList.remove('hidden');
+    // During token stream keep plain text; final event re-renders with links.
     answer.textContent += text || '';
+  },
+
+  openCitation(n) {
+    const c = (this._lastCitations || []).find((x) => Number(x.n) === Number(n));
+    const drawer = document.getElementById('cite-drawer');
+    const title = document.getElementById('cite-drawer-title');
+    const meta = document.getElementById('cite-drawer-meta');
+    const body = document.getElementById('cite-drawer-body');
+    if (!drawer || !title || !meta || !body) return;
+    if (!c) {
+      title.textContent = `Источник [${n}]`;
+      meta.textContent = 'Фрагмент не найден в ответе';
+      body.textContent = '';
+      drawer.classList.remove('hidden');
+      return;
+    }
+    const kind = c.kind === 'web' || c.url ? 'web' : 'kb';
+    title.textContent = `[${c.n}] ${c.title || (kind === 'web' ? 'веб' : 'документ')}`;
+    const bits = [];
+    if (kind === 'web') bits.push('веб');
+    if (c.page != null) bits.push(`стр. ${c.page}`);
+    if (c.doc_id) bits.push(`документ #${c.doc_id}`);
+    if (c.chunk_id) bits.push(`фрагмент #${c.chunk_id}`);
+    if (c.score != null && kind === 'kb') bits.push(`релевантность ${c.score}`);
+    if (c.url) {
+      meta.innerHTML =
+        (bits.length ? this._escape(bits.join(' · ')) + ' · ' : '') +
+        `<a href="${this._escapeAttr(c.url)}" target="_blank" rel="noopener noreferrer">${this._escape(c.url)}</a>`;
+    } else {
+      if (c.section_path) bits.push(c.section_path);
+      meta.textContent = bits.join(' · ') || '—';
+    }
+    const snippet = c.text || '';
+    body.innerHTML = snippet
+      ? `<mark>${this._escape(snippet)}</mark>`
+      : '<span class="muted">Текст фрагмента не передан</span>';
+    drawer.classList.remove('hidden');
+    body.scrollTop = 0;
+  },
+
+  closeCitation() {
+    document.getElementById('cite-drawer')?.classList.add('hidden');
   },
 
   _showTrace(traceEl, mode, data) {
@@ -177,7 +249,7 @@ const PrismApp = {
     const modeLabel = this._modeRu(data.retrieval_mode || mode);
     const ground = data.grounding_ok == null
       ? ''
-      : (data.grounding_ok ? ' · опора на контекст: да' : ' · опора на контекст: нет');
+      : (data.grounding_ok ? ' · опора на источники: да' : ' · опора на источники: нет');
     traceEl.classList.remove('hidden');
     traceEl.innerHTML =
       `Трасса: <a href="/trace?${q}">${this._escape(data.trace_id)}</a> · ${this._escape(modeLabel)}${ground}`;
@@ -185,10 +257,26 @@ const PrismApp = {
 
   _showCitations(sourcesEl, citations) {
     if (!sourcesEl) return;
-    sourcesEl.innerHTML = (citations || []).map((c) => `
-      <div class="source">
-        <div class="meta">[${c.n}] ${this._escape(c.title)} · релевантность ${c.score}${c.section_path ? ' · ' + this._escape(c.section_path) : ''}</div>
-      </div>`).join('');
+    this._lastCitations = citations || [];
+    sourcesEl.innerHTML = (citations || []).map((c) => {
+      const kind = c.kind === 'web' || c.url ? 'web' : 'kb';
+      const loc = c.url
+        ? this._escape(c.url)
+        : (c.section_path ? this._escape(c.section_path) : '');
+      const scoreBit = kind === 'kb' && c.score != null ? ` · релевантность ${c.score}` : '';
+      return `
+      <div class="source" role="button" tabindex="0" data-cite="${c.n}" title="Показать цитируемый фрагмент">
+        <div class="meta">[${c.n}] ${kind === 'web' ? '[web] ' : ''}${this._escape(c.title)}${scoreBit}${loc ? ' · ' + loc : ''}</div>
+        <div class="muted">${this._escape((c.text || '').slice(0, 180))}${(c.text || '').length > 180 ? '…' : ''}</div>
+      </div>`;
+    }).join('');
+    sourcesEl.querySelectorAll('[data-cite]').forEach((el) => {
+      const open = () => this.openCitation(Number(el.getAttribute('data-cite')));
+      el.addEventListener('click', open);
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+      });
+    });
   },
 
   _chatPayload() {

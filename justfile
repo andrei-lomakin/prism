@@ -68,8 +68,8 @@ init-db:
 rebuild-bm25:
     {{ python }} -m prism.cli rebuild-bm25
 
-ingest-demo:
-    {{ python }} -m prism.cli ingest-demo
+ingest-demo *args:
+    {{ python }} -m prism.cli ingest-demo {{ args }}
 
 golden target="240":
     {{ python }} -m prism.cli golden build --target {{ target }}

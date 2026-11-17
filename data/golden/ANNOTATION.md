@@ -39,8 +39,12 @@ Languages: `ru` / `en`. Target mix: both present; unanswerable ≥10%; multi-hop
 
 ## Split policy
 
-- Stratified by `type` into `dev` / `test` (~70/30).
+- **Unit of split = `family`**, not individual rows.
+- Family = seed cognates (`f_foo_en` + `f_foo_ru`) + all prefix paraphrases of that seed.
+- Stratify *families* by `type` into `dev` / `test` (~70/30). A seed and its “In one sentence: …” clone never land in different splits.
+- Same corpus for both splits is fine; tuning on near-duplicates of test questions is not.
 - **Never** tune chunking / embedder / hybrid hyperparameters on `test`.
+- Extra **hand-written controls** (`notes` contain `hand-written control`) are independently worded — not template wraps.
 
 ## Regeneration
 
@@ -48,4 +52,4 @@ Languages: `ru` / `en`. Target mix: both present; unanswerable ≥10%; multi-hop
 prism golden build --target 240
 ```
 
-Paraphrases are marked `reviewed=false` and `notes` explain origin. Prefer promoting paraphrases to reviewed only after a human look.
+Paraphrases are marked `reviewed=false`, share `family` with the seed, and `notes` explain origin. Prefer promoting paraphrases to reviewed only after a human look.

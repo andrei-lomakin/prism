@@ -1,55 +1,65 @@
 {
   "total": 240,
   "seeds": 36,
+  "controls": 6,
+  "families": 38,
+  "split_unit": "family",
   "dev": {
-    "n": 170,
+    "n": 174,
+    "families": 29,
     "by_type": {
-      "factoid": 51,
-      "numeric": 23,
-      "comparison": 20,
-      "multi-hop": 43,
-      "unanswerable": 33
+      "factoid": 42,
+      "numeric": 21,
+      "comparison": 27,
+      "multi-hop": 50,
+      "unanswerable": 34
     },
     "by_lang": {
-      "en": 122,
-      "ru": 48
+      "en": 157,
+      "ru": 17
     },
-    "reviewed": 24,
-    "unanswerable_pct": 19.4,
-    "multihop_pct": 25.3
+    "reviewed": 31,
+    "controls": 5,
+    "unanswerable_pct": 19.5,
+    "multihop_pct": 28.7
   },
   "test": {
-    "n": 70,
+    "n": 66,
+    "families": 9,
     "by_type": {
-      "factoid": 21,
+      "factoid": 27,
       "numeric": 9,
-      "comparison": 8,
-      "multi-hop": 18,
-      "unanswerable": 14
+      "comparison": 11,
+      "multi-hop": 10,
+      "unanswerable": 9
     },
     "by_lang": {
-      "ru": 21,
-      "en": 49
+      "en": 28,
+      "ru": 38
     },
-    "reviewed": 12,
-    "unanswerable_pct": 20.0,
-    "multihop_pct": 25.7
+    "reviewed": 11,
+    "controls": 1,
+    "unanswerable_pct": 13.6,
+    "multihop_pct": 15.2
   },
   "all": {
     "n": 240,
+    "families": 38,
     "by_type": {
-      "factoid": 72,
-      "numeric": 32,
-      "comparison": 28,
-      "multi-hop": 61,
-      "unanswerable": 47
+      "factoid": 69,
+      "numeric": 30,
+      "comparison": 38,
+      "multi-hop": 60,
+      "unanswerable": 43
     },
     "by_lang": {
-      "en": 171,
-      "ru": 69
+      "en": 185,
+      "ru": 55
     },
-    "reviewed": 36,
-    "unanswerable_pct": 19.6,
-    "multihop_pct": 25.4
-  }
+    "reviewed": 42,
+    "controls": 6,
+    "unanswerable_pct": 17.9,
+    "multihop_pct": 25.0
+  },
+  "notes": "Prefix paraphrases share seed family with the original; dev/test split is by family (no cross-split leak). Controls are independently worded, not template wraps."
 }

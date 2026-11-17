@@ -1,8 +1,13 @@
 """Post-generation grounding checks.
 
-1) Every [n] must exist.
-2) Numbers and Capitalized/Cyrillic names from the answer should appear in the
-   cited chunk text (soft check — violations listed, ok=False if any hard miss).
+Structural / lexical heuristics — NOT full semantic entailment.
+
+Hard fail when:
+1) a citation [n] is out of range;
+2) sources were provided but the answer has no valid citation at all;
+3) a number in the answer is missing from the union of *cited* chunk texts.
+
+Names are soft diagnostics only.
 """
 
 from __future__ import annotations
@@ -19,6 +24,7 @@ class GroundingReport:
     unused_sources: list[int]
     unsupported_numbers: list[str] = field(default_factory=list)
     unsupported_names: list[str] = field(default_factory=list)
+    requires_citation: bool = False
 
 
 _CITE_RE = re.compile(r"\[(\d+)\]")
@@ -42,28 +48,30 @@ def check_grounding(
     used = {i for i in cited if 1 <= i <= n}
     unused = [i for i in range(1, n + 1) if i not in used]
 
+    # If the retriever gave context, an answer with zero valid citations is not grounded.
+    requires_citation = n > 0
+    has_valid_citation = len(used) > 0
+
     unsupported_numbers: list[str] = []
     unsupported_names: list[str] = []
 
     if sources and cited and not missing:
-        # Strip citation markers before extracting entities
-        # Numbers/names in the answer must appear in the union of cited chunks.
         clean = _CITE_RE.sub(" ", answer)
         cited_text = " ".join(sources[i - 1] for i in cited if 1 <= i <= len(sources)).lower()
         for num in _NUM_RE.findall(clean):
             if num.lower() not in cited_text and num not in cited_text:
                 unsupported_numbers.append(num)
         for name in list(_NAME_RE.findall(clean)) + list(_NAME_RU_RE.findall(clean)):
-            # skip common non-entities
             if name.lower() in {"the", "this", "that", "rag", "bm25", "json"}:
                 continue
-            if name.lower() not in cited_text and name not in sources:
-                # case-insensitive containment
-                if name.lower() not in cited_text:
-                    unsupported_names.append(name)
+            if name.lower() not in cited_text:
+                unsupported_names.append(name)
 
-    ok = len(missing) == 0 and len(unsupported_numbers) == 0
-    # names are soft: don't fail ok solely on names (too noisy), but report them
+    ok = (
+        len(missing) == 0
+        and len(unsupported_numbers) == 0
+        and (has_valid_citation if requires_citation else True)
+    )
     return GroundingReport(
         ok=ok,
         cited=cited,
@@ -71,4 +79,5 @@ def check_grounding(
         unused_sources=unused,
         unsupported_numbers=sorted(set(unsupported_numbers)),
         unsupported_names=sorted(set(unsupported_names))[:20],
+        requires_citation=requires_citation,
     )

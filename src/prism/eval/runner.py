@@ -18,6 +18,7 @@ from prism.eval.dataset import load_golden, resolve_data_path
 from prism.eval.judge import judge_answer
 from prism.eval.metrics import (
     answer_correctness_lexical,
+    chunk_relevance_labels,
     context_precision_at_k,
     context_recall_at_k,
     hit_rate_at_k,
@@ -27,7 +28,12 @@ from prism.eval.metrics import (
     recall_at_k,
 )
 from prism.eval.provenance import git_provenance
-from prism.eval.relevance import gold_doc_keys, retrieved_doc_keys
+from prism.eval.relevance import (
+    gold_doc_keys,
+    gold_evidence_units,
+    retrieved_context_units,
+    retrieved_doc_keys,
+)
 from prism.eval.report import new_run_id, write_report
 from prism.eval.schema import GoldenQuestion
 from prism.llm.gateway import LLMGateway
@@ -241,6 +247,9 @@ def _eval_one(
 
     relevant = gold_doc_keys(q)
     ranked = retrieved_doc_keys(hits)
+    gold_units = gold_evidence_units(q)
+    ctx_units = retrieved_context_units(hits)
+    ctx_labels = chunk_relevance_labels(gold_units, ctx_units)
 
     row: dict[str, Any] = {
         "id": q.id,
@@ -256,8 +265,8 @@ def _eval_one(
         "recall@5": recall_at_k(relevant, ranked, 5) if relevant else None,
         "recall@10": recall_at_k(relevant, ranked, 10) if relevant else None,
         "precision@5": precision_at_k(relevant, ranked, 5) if relevant else None,
-        "context_precision@5": context_precision_at_k(relevant, ranked, 5) if relevant else None,
-        "context_recall@5": context_recall_at_k(relevant, ranked, 5) if relevant else None,
+        "context_precision@5": context_precision_at_k(ctx_labels, 5) if gold_units else None,
+        "context_recall@5": context_recall_at_k(gold_units, ctx_units, 5) if gold_units else None,
         "mrr@10": mrr_at_k(relevant, ranked, 10) if relevant else None,
         "ndcg@10": ndcg_at_k(relevant, ranked, 10) if relevant else None,
         "hit@5": hit_rate_at_k(relevant, ranked, 5) if relevant else None,

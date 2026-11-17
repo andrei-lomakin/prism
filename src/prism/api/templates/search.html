@@ -142,6 +142,15 @@
   </div>
   <div id="sources" class="sources"></div>
 </section>
+
+<aside id="cite-drawer" class="cite-drawer hidden" aria-live="polite">
+  <div class="cite-drawer-head">
+    <strong id="cite-drawer-title">Источник</strong>
+    <button type="button" class="btn btn-ghost" id="cite-drawer-close">Закрыть</button>
+  </div>
+  <p id="cite-drawer-meta" class="muted"></p>
+  <div id="cite-drawer-body" class="cite-drawer-body"></div>
+</aside>
 {% endblock %}
 {% block scripts %}
 <script>
@@ -194,6 +203,10 @@
     syncHidden('mode', 'mode');
     syncHidden('space', 'space');
     PrismApp.searchOnly();
+  });
+  document.getElementById('cite-drawer-close')?.addEventListener('click', () => PrismApp.closeCitation());
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') PrismApp.closeCitation();
   });
 </script>
 {% endblock %}

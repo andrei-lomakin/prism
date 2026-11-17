@@ -16,6 +16,11 @@ def main(argv: list[str] | None = None) -> int:
 
     demo_p = sub.add_parser("ingest-demo", help="Index data/demo/corpus into Postgres")
     demo_p.add_argument("--space", default="shared")
+    demo_p.add_argument(
+        "--force",
+        action="store_true",
+        help="Force reindex even if content+pipeline fingerprint unchanged",
+    )
 
     golden_p = sub.add_parser("golden", help="Golden dataset commands")
     golden_sub = golden_p.add_subparsers(dest="golden_cmd")
@@ -36,9 +41,19 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Skip LLM judge; use lexical heuristics only",
     )
-    eval_sub.add_parser(
+    compare_p = eval_sub.add_parser(
         "compare",
         help="Build ablation comparison table from reports/*/metrics.json",
+    )
+    compare_p.add_argument(
+        "--baseline",
+        default=None,
+        help="Scientific baseline run_id (never use smoke/diagnostic)",
+    )
+    compare_p.add_argument(
+        "--baseline-config",
+        default=None,
+        help="Prefer runs whose eval_config contains this path (default: ablate_dense → baseline.yaml)",
     )
     eval_sub.add_parser(
         "provenance",
@@ -84,7 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "ingest-demo":
         from prism.ingest.demo import ingest_demo_corpus
 
-        summary = ingest_demo_corpus(space=args.space)
+        summary = ingest_demo_corpus(space=args.space, force_reindex=bool(args.force))
         print(json.dumps(summary, ensure_ascii=False, indent=2))
         return 0 if summary.get("failed_jobs", 0) == 0 else 1
 
@@ -109,7 +124,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "eval" and args.eval_cmd == "compare":
         from prism.eval.compare import write_comparison
 
-        summary = write_comparison()
+        summary = write_comparison(
+            baseline_run=getattr(args, "baseline", None),
+            baseline_config=getattr(args, "baseline_config", None),
+        )
         print(json.dumps(summary, ensure_ascii=False, indent=2))
         return 0
 

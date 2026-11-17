@@ -31,6 +31,8 @@ class GoldenQuestion(BaseModel):
     split: Split
     reviewed: bool = False
     notes: str = ""
+    # Seed family: paraphrases + EN/RU cognates share one id → same split (anti-leak).
+    family: str = ""
 
     @field_validator("relevant_docs")
     @classmethod

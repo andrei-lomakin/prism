@@ -106,12 +106,15 @@ class ChatRequest(BaseModel):
 
 class Citation(BaseModel):
     n: int
-    chunk_id: int
-    doc_id: int
+    chunk_id: int | None = None
+    doc_id: int | None = None
     title: str
     section_path: str | None = None
     page: int | None = None
     score: float
+    text: str | None = None  # chunk / web snippet for UI highlight
+    url: str | None = None
+    kind: Literal["kb", "web"] | None = "kb"
 
 
 class UsageOut(BaseModel):

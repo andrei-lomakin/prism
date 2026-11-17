@@ -9,6 +9,10 @@
       "chunking": "C2",
       "embedding": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
       "retrieval": "dense",
+      "rewrite": null,
+      "rerank": null,
+      "top_k_eval": 10,
+      "diagnostic": true,
       "recall@5": 0.0,
       "mrr@10": 0.0,
       "ndcg@10": 0.0,
@@ -29,6 +33,10 @@
       "chunking": "C2",
       "embedding": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
       "retrieval": "dense",
+      "rewrite": null,
+      "rerank": null,
+      "top_k_eval": 10,
+      "diagnostic": true,
       "recall@5": 0.925,
       "mrr@10": 0.6683,
       "ndcg@10": 0.7599,
@@ -49,6 +57,10 @@
       "chunking": "C2",
       "embedding": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
       "retrieval": "hybrid",
+      "rewrite": null,
+      "rerank": null,
+      "top_k_eval": 10,
+      "diagnostic": false,
       "recall@5": 0.9342,
       "mrr@10": 0.7544,
       "ndcg@10": 0.8171,
@@ -62,17 +74,7 @@
     }
   ],
   "paired_best_vs_baseline": {
-    "best_run": "20261116T132843Z_ablate_hybrid",
-    "baseline_run": "20261116T105854Z_smoke",
-    "metric": "recall@5",
-    "paired_bootstrap": {
-      "n": 20,
-      "mean_a": 0.975,
-      "mean_b": 0.0,
-      "delta": 0.975,
-      "ci95_lo": 0.925,
-      "ci95_hi": 1.0,
-      "p_better": 1.0
-    }
+    "error": "no_scientific_baseline",
+    "hint": "Pass --baseline RUN_ID or run configs/eval/ablate_dense.yaml / baseline.yaml"
   }
 }

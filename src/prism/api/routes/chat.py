@@ -95,12 +95,15 @@ def api_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespons
             citations=[
                 Citation(
                     n=c["n"],
-                    chunk_id=int(c.get("chunk_id") or 0),
-                    doc_id=int(c.get("doc_id") or 0),
+                    chunk_id=c.get("chunk_id"),
+                    doc_id=c.get("doc_id"),
                     title=str(c.get("title") or ""),
                     section_path=c.get("section_path"),
                     page=c.get("page"),
                     score=round(float(c.get("score") or 0.0), 4),
+                    text=(c.get("text") or None),
+                    url=c.get("url"),
+                    kind=c.get("kind") or ("web" if c.get("url") else "kb"),
                 )
                 for c in answer.citations
             ],
@@ -149,6 +152,7 @@ def api_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespons
             section_path=h.section_path,
             page=h.page,
             score=round(h.score, 4),
+            text=h.text,
         )
         for i, h in enumerate(hits, start=1)
     ]
@@ -310,7 +314,10 @@ def api_chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> Stre
                                 "chunk_id": h.chunk_id,
                                 "doc_id": h.document_id,
                                 "title": h.document_name,
+                                "section_path": h.section_path,
+                                "page": h.page,
                                 "score": round(h.score, 4),
+                                "text": h.text,
                             }
                             for i, h in enumerate(hits, start=1)
                         ],

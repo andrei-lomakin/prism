@@ -9,6 +9,11 @@ from sqlalchemy.orm import Session
 
 from prism.config import get_settings
 from prism.db.models import Chunk, Document, Job
+from prism.ingest.fingerprint import (
+    index_fingerprint,
+    index_pipeline_spec,
+    stored_index_fingerprint,
+)
 from prism.ingest.parsers import content_hash, extract_text_from_file
 from prism.rag.chunking import chunk_text
 from prism.rag.embeddings import get_embedder
@@ -17,7 +22,7 @@ from prism.rag.retrieve.packer import estimate_tokens
 logger = logging.getLogger(__name__)
 
 
-def run_ingest(db: Session, job_id: int) -> None:
+def run_ingest(db: Session, job_id: int, *, force_reindex: bool = False) -> None:
     job = db.get(Job, job_id)
     if job is None:
         raise RuntimeError(f"job {job_id} not found")
@@ -36,30 +41,49 @@ def run_ingest(db: Session, job_id: int) -> None:
         if not text.strip():
             raise ValueError("Document contains no extractable text")
 
+        settings = get_settings()
         digest = content_hash(text)
-        # Idempotent reindex: compare hash BEFORE flipping status to indexing.
+        pipe_fp = index_fingerprint(settings)
         prev_hash = doc.content_hash
+        prev_fp = stored_index_fingerprint(doc.meta)
         prev_chunks = doc.num_chunks or 0
+
+        # Skip only when BOTH raw text and indexing pipeline match.
+        # Otherwise ablations (C2→C5, new embedder, …) would silently keep old chunks.
         if (
-            prev_hash == digest
+            not force_reindex
+            and prev_hash == digest
+            and prev_fp == pipe_fp
             and prev_chunks > 0
-            and doc.status in ("indexed", "pending", "indexing")
+            and doc.status == "indexed"
         ):
-            # Only skip when we already have vectors for this exact content.
             has_chunks = len(doc.chunks) > 0 if doc.chunks is not None else prev_chunks > 0
-            if has_chunks and doc.status == "indexed":
+            if has_chunks:
                 doc.error_message = None
                 db.commit()
                 _set_job(db, job, status="completed", progress=100, step="skipped_unchanged")
-                logger.info("Ingest skipped (unchanged hash) document_id=%s", doc.id)
+                logger.info(
+                    "Ingest skipped (content+pipeline unchanged) document_id=%s fp=%s",
+                    doc.id,
+                    pipe_fp[:12],
+                )
                 return
+
+        if force_reindex:
+            logger.info("Ingest force_reindex document_id=%s", doc.id)
+        elif prev_hash == digest and prev_fp != pipe_fp:
+            logger.info(
+                "Ingest reindex: pipeline changed document_id=%s old_fp=%s new_fp=%s",
+                doc.id,
+                (prev_fp or "")[:12],
+                pipe_fp[:12],
+            )
 
         doc.status = "indexing"
         doc.error_message = None
         doc.content_hash = digest
         db.commit()
 
-        settings = get_settings()
         _set_job(db, job, progress=30, step="chunking")
         # char budget ≈ 4 * token size for C1–C3 heuristic
         max_chars = settings.chunk_size * 4
@@ -101,6 +125,8 @@ def run_ingest(db: Session, job_id: int) -> None:
         if isinstance(key, str) and key.startswith("demo_"):
             key = key[len("demo_") :]
         meta["doc_key"] = key
+        meta["index_fingerprint"] = pipe_fp
+        meta["index_pipeline"] = index_pipeline_spec(settings)
 
         _set_job(db, job, progress=85, step="saving")
         for i, (piece, vec) in enumerate(zip(pieces, embeddings, strict=True)):

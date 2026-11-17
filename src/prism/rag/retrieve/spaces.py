@@ -24,19 +24,33 @@ def apply_space_weights(
     chunks: list[RetrievedChunk],
     weights: dict[str, float] | None = None,
 ) -> list[RetrievedChunk]:
-    """Re-score by space weight and stable-sort by score desc."""
+    """Multiply retrieval score by space weight and re-sort desc.
+
+    Writes explicit score fields into meta:
+      score_retrieval — input score
+      space_weight — factor for this space
+      score_space_weighted — product (also copied to chunk.score)
+    """
     w = weights or DEFAULT_WEIGHTS
     out: list[RetrievedChunk] = []
     for ch in chunks:
         factor = float(w.get(ch.space, 1.0))
-        meta = {**(ch.meta or {}), "space_weight": factor, "score_raw": ch.score}
+        raw = float(ch.score)
+        weighted = raw * factor
+        meta = {
+            **(ch.meta or {}),
+            "score_retrieval": raw,
+            "score_raw": raw,  # alias kept for older traces
+            "space_weight": factor,
+            "score_space_weighted": weighted,
+        }
         out.append(
             RetrievedChunk(
                 chunk_id=ch.chunk_id,
                 document_id=ch.document_id,
                 document_name=ch.document_name,
                 text=ch.text,
-                score=float(ch.score) * factor,
+                score=weighted,
                 section_path=ch.section_path,
                 page=ch.page,
                 space=ch.space,

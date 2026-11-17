@@ -123,30 +123,42 @@ def _retrieve_inner(
         hits = _dense_search(db, semantic_q, candidate_k=candidate_k, settings=cfg)
         trace_parts.append("error->dense_fallback")
 
+    # Score contract (explicit stages):
+    #   1) retrieval score on chunk.score (dense / BM25 / RRF / …)
+    #   2) optional space_weights → score := retrieval * space_weight  (re-sort)
+    #      meta: score_retrieval, space_weight, score_space_weighted
+    #   3) truncate to rerank_candidates (so space can push weak spaces out of CE pool)
+    #   4) optional cross-encoder rerank → score := rerank_score (final order)
+    #      meta: score_pre_rerank, rerank_score
+    did_rerank = False
+    if cfg.space_weights_enabled and hits:
+        hits = apply_space_weights(hits, space_weights_from_settings(cfg))
+        trace_parts.append("space_weights")
+
     if cfg.rerank_enabled and hits:
+        pool_n = min(len(hits), max(k, cfg.rerank_candidates))
+        if len(hits) > pool_n:
+            hits = hits[:pool_n]
+            trace_parts.append(f"rerank_pool:{pool_n}")
         t0 = perf_counter()
-        order = cross_rerank(
+        hits = apply_cross_encoder_rerank(
+            hits,
             semantic_q,
-            [h.text for h in hits],
             top_n=min(k, len(hits)),
             model_name=cfg.rerank_model,
         )
-        reranked = [hits[i] for i, _ in order]
-        # attach rerank score into a copy-friendly way via meta not available — keep order
-        hits = reranked
+        did_rerank = True
         trace_parts.append(f"rerank:{int((perf_counter() - t0) * 1000)}ms")
 
     # C7: expand child → parent text for generation context when present
     hits = [_maybe_expand_parent(h) for h in hits]
 
-    if cfg.space_weights_enabled:
-        hits = apply_space_weights(hits, space_weights_from_settings(cfg))
-        trace_parts.append("space_weights")
-
     if space:
         hits = [h for h in hits if (h.space or "personal") == space]
         trace_parts.append(f"space:{space}")
 
+    # CE logits can be negative — do not apply retrieval-oriented min_score after rerank.
+    pack_floor = float("-inf") if did_rerank else cfg.pack_min_score
     with span(
         "rag.pack",
         attributes={"max_chunks": cfg.pack_max_chunks, "candidate_n": len(hits)},
@@ -156,9 +168,51 @@ def _retrieve_inner(
             max_chunks=cfg.pack_max_chunks,
             max_tokens=cfg.pack_max_tokens,
             max_per_doc=cfg.pack_max_per_doc,
-            min_score=cfg.pack_min_score,
+            min_score=pack_floor,
         )
     return packed[:k], "+".join(trace_parts)
+
+
+def apply_cross_encoder_rerank(
+    hits: list[RetrievedChunk],
+    query: str,
+    *,
+    top_n: int,
+    model_name: str,
+    rerank_fn=cross_rerank,
+) -> list[RetrievedChunk]:
+    """Re-order hits by cross-encoder; store CE score as chunk.score (final)."""
+    if not hits or top_n <= 0:
+        return []
+    order = rerank_fn(
+        query,
+        [h.text for h in hits],
+        top_n=min(top_n, len(hits)),
+        model_name=model_name,
+    )
+    out: list[RetrievedChunk] = []
+    for idx, rr_score in order:
+        h = hits[idx]
+        meta = {
+            **(h.meta or {}),
+            "score_pre_rerank": float(h.score),
+            "rerank_score": float(rr_score),
+        }
+        out.append(
+            RetrievedChunk(
+                chunk_id=h.chunk_id,
+                document_id=h.document_id,
+                document_name=h.document_name,
+                text=h.text,
+                score=float(rr_score),
+                section_path=h.section_path,
+                page=h.page,
+                space=h.space,
+                doc_key=h.doc_key,
+                meta=meta,
+            )
+        )
+    return out
 
 
 def _maybe_expand_parent(h: RetrievedChunk) -> RetrievedChunk:

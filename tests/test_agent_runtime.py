@@ -99,6 +99,33 @@ def test_multi_orchestrator_spawns_subagents():
     assert "search_kb" in tools
 
 
+def test_merge_sources_kb_then_web_numbering():
+    hits = [
+        {
+            "chunk_id": 10,
+            "document_id": 1,
+            "document_name": "kb.md",
+            "text": "kb chunk",
+            "score": 0.9,
+            "section_path": "Intro",
+        }
+    ]
+    web = [
+        {
+            "title": "Web page",
+            "url": "https://example.com/a",
+            "snippet": "web snippet",
+        }
+    ]
+    contexts, texts, cites = AgentRuntime._merge_sources(hits, web)
+    assert [c["n"] for c in cites] == [1, 2]
+    assert cites[0]["kind"] == "kb" and cites[0]["text"] == "kb chunk"
+    assert cites[1]["kind"] == "web" and cites[1]["url"] == "https://example.com/a"
+    assert texts == ["kb chunk", "web snippet"]
+    assert len(contexts) == 2
+    assert contexts[1]["section_path"] == "https://example.com/a"
+
+
 def test_memory_remember_recall():
     from prism.agents.memory import MemoryStore
 

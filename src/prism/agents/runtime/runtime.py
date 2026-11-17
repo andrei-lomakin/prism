@@ -235,14 +235,16 @@ class AgentRuntime:
                     run=run,
                 )
                 hits = list(ret.get("hits") or [])
-                draft = self._draft_from_hits(objective, hits)
+                web = list((web_report or {}).get("results") or [])
+                _, source_texts, _ = self._merge_sources(hits, web)
+                draft = self._draft_from_hits(objective, hits, web)
                 critic_report = run_critic(
                     gate=self.gate,
                     registry=self.registry,
                     limits=self.limits,
                     objective=objective,
                     answer=draft,
-                    sources=[h.get("text", "") for h in hits],
+                    sources=source_texts,
                     run=run,
                 )
                 self._record_step("tool", {"tool": "verify_citations"}, critic_report)
@@ -332,12 +334,14 @@ class AgentRuntime:
 
             # Prefer analyst table as scaffolding for synthesis
             table_md = (analyst_report or {}).get("markdown")
+            web_snippets = list((web_report or {}).get("results") or [])
+            _, source_texts, citations = self._merge_sources(hits, web_snippets)
             answer_text, model, tin, tout, cost, llm_ms = self._synthesize(
                 objective,
                 hits,
                 partial=self.limits.usage.partial,
                 table_md=table_md if isinstance(table_md, str) else None,
-                web_snippets=list((web_report or {}).get("results") or []),
+                web_snippets=web_snippets,
             )
             self.limits.note_llm(tin + tout, cost)
 
@@ -350,7 +354,7 @@ class AgentRuntime:
                     limits=self.limits,
                     objective=objective,
                     answer=answer_text,
-                    sources=[h.get("text", "") for h in hits],
+                    sources=source_texts,
                     run=run,
                 )
                 self._record_step("tool", {"tool": "verify_citations"}, critic_report)
@@ -360,6 +364,7 @@ class AgentRuntime:
                         hits,
                         partial=self.limits.usage.partial,
                         table_md=table_md if isinstance(table_md, str) else None,
+                        web_snippets=web_snippets,
                         revision_note="critic requested revision",
                     )
                     model = model2 or model
@@ -370,7 +375,7 @@ class AgentRuntime:
                     self.limits.note_llm(tin2 + tout2, cost2)
                     self._record_step("synthesize", {"revision": True}, {"model": model})
 
-            grounding = check_grounding(answer_text, [h.get("text", "") for h in hits])
+            grounding = check_grounding(answer_text, source_texts)
             if critic_report and (
                 critic_report.get("grounding_ok") is False or critic_report.get("needs_revision")
             ):
@@ -383,19 +388,6 @@ class AgentRuntime:
 
             if self.limits.usage.partial and not answer_text.startswith("[частичный"):
                 answer_text = "[частичный ответ — бюджет исчерпан]\n" + answer_text
-
-            citations = [
-                {
-                    "n": i,
-                    "chunk_id": h.get("chunk_id"),
-                    "doc_id": h.get("document_id"),
-                    "title": h.get("document_name") or "",
-                    "section_path": h.get("section_path"),
-                    "page": h.get("page"),
-                    "score": float(h.get("score") or 0.0),
-                }
-                for i, h in enumerate(hits, start=1)
-            ]
 
             distill_info = None
             if self.settings.distill_enabled and self.registry.get("distill_run"):
@@ -534,7 +526,8 @@ class AgentRuntime:
                 )
             if child.role == "critic":
                 hits = list(scratch.get("hits") or [])
-                if not hits:
+                web = list(scratch.get("web_results") or [])
+                if not hits and not web:
                     ret = run_retriever(
                         gate=self.gate,
                         registry=self.registry,
@@ -544,17 +537,19 @@ class AgentRuntime:
                     )
                     hits = list(ret.get("hits") or [])
                     scratch["hits"] = hits
-                draft = self._draft_from_hits(objective, hits)
+                _, source_texts, _ = self._merge_sources(hits, web)
+                draft = self._draft_from_hits(objective, hits, web)
                 report = run_critic(
                     gate=self.gate,
                     registry=self.registry,
                     limits=self.limits,
                     objective=objective,
                     answer=draft,
-                    sources=[h.get("text", "") for h in hits],
+                    sources=source_texts,
                     run=parent,
                 )
                 report["hits"] = hits
+                report["web_results"] = web
                 return report
             return {"error": f"unknown_role:{child.role}"}
 
@@ -574,11 +569,86 @@ class AgentRuntime:
     def _tool_stop(self, *, child_id: int) -> dict[str, Any]:
         return self.subagents.stop(child_id)
 
-    def _draft_from_hits(self, objective: str, hits: list[dict[str, Any]]) -> str:
-        if not hits:
+    @staticmethod
+    def _merge_sources(
+        hits: list[dict[str, Any]],
+        web_snippets: list[dict[str, Any]] | None = None,
+    ) -> tuple[list[dict[str, Any]], list[str], list[dict[str, Any]]]:
+        """KB first, then web — same order as prompt `[n]` / critic / UI citations."""
+        contexts: list[dict[str, Any]] = []
+        texts: list[str] = []
+        citations: list[dict[str, Any]] = []
+        n = 0
+        for h in hits:
+            n += 1
+            text = h.get("text") or ""
+            contexts.append(
+                {
+                    "text": text,
+                    "document_name": h.get("document_name"),
+                    "score": h.get("score"),
+                    "section_path": h.get("section_path"),
+                }
+            )
+            texts.append(text)
+            citations.append(
+                {
+                    "n": n,
+                    "kind": "kb",
+                    "chunk_id": h.get("chunk_id"),
+                    "doc_id": h.get("document_id"),
+                    "title": h.get("document_name") or "",
+                    "section_path": h.get("section_path"),
+                    "page": h.get("page"),
+                    "score": float(h.get("score") or 0.0),
+                    "text": text,
+                    "url": None,
+                }
+            )
+        for w in web_snippets or []:
+            n += 1
+            text = w.get("snippet") or w.get("text") or ""
+            url = (w.get("url") or "").strip() or None
+            title = w.get("title") or f"web-{n}"
+            contexts.append(
+                {
+                    "text": text,
+                    "document_name": title,
+                    "score": 0.0,
+                    "section_path": url,
+                }
+            )
+            texts.append(text)
+            citations.append(
+                {
+                    "n": n,
+                    "kind": "web",
+                    "chunk_id": None,
+                    "doc_id": None,
+                    "title": title,
+                    "section_path": url,
+                    "page": None,
+                    "score": 0.0,
+                    "text": text,
+                    "url": url,
+                }
+            )
+        return contexts, texts, citations
+
+    def _draft_from_hits(
+        self,
+        objective: str,
+        hits: list[dict[str, Any]],
+        web: list[dict[str, Any]] | None = None,
+    ) -> str:
+        if not hits and not web:
             return f"Нет контекста для: {objective}"
-        bits = " ".join((h.get("text") or "")[:200] for h in hits[:3])
-        return f"По источникам: {bits} [1]"
+        _, _, cites = self._merge_sources(hits, web)
+        if not cites:
+            return f"Нет контекста для: {objective}"
+        top = cites[0]
+        snippet = (top.get("text") or "")[:200]
+        return f"По источникам: {snippet} [1]"
 
     def _synthesize(
         self,
@@ -590,24 +660,7 @@ class AgentRuntime:
         web_snippets: list[dict[str, Any]] | None = None,
         revision_note: str | None = None,
     ) -> tuple[str, str, int, int, float, int]:
-        contexts = [
-            {
-                "text": h.get("text"),
-                "document_name": h.get("document_name"),
-                "score": h.get("score"),
-                "section_path": h.get("section_path"),
-            }
-            for h in hits
-        ]
-        for i, w in enumerate(web_snippets or [], start=1):
-            contexts.append(
-                {
-                    "text": w.get("snippet") or w.get("text") or "",
-                    "document_name": w.get("title") or f"web-{i}",
-                    "score": 0.0,
-                    "section_path": w.get("url"),
-                }
-            )
+        contexts, _, _ = self._merge_sources(hits, web_snippets)
         prompt = build_rag_prompt(objective, contexts)
         if table_md:
             prompt += f"\n\nЧерновик таблицы от Analyst:\n{table_md}\nВключи таблицу в ответ."
