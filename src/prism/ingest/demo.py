@@ -13,6 +13,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
+from prism.api.settings_store import ingest_settings_payload, settings_as_config
 from prism.config import get_settings
 from prism.db.models import Document, Job
 from prism.db.session import get_session_factory, init_db
@@ -85,6 +86,7 @@ def ingest_demo_corpus(*, space: str = "shared", force_reindex: bool = False) ->
                 status="queued",
                 progress=0,
                 current_step="queued",
+                payload=ingest_settings_payload(settings_as_config(db)),
             )
             db.add(job)
             db.commit()

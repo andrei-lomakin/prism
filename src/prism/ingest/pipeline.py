@@ -7,7 +7,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from prism.config import get_settings
+from prism.config import Settings
 from prism.db.models import Chunk, Document, Job
 from prism.ingest.fingerprint import (
     index_fingerprint,
@@ -22,7 +22,25 @@ from prism.rag.retrieve.packer import estimate_tokens
 logger = logging.getLogger(__name__)
 
 
-def run_ingest(db: Session, job_id: int, *, force_reindex: bool = False) -> None:
+def resolve_ingest_settings(db: Session, job: Job, explicit: Settings | None = None) -> Settings:
+    """Job snapshot, else UI/DB overlay, else process env."""
+    if explicit is not None:
+        return explicit
+    from prism.api.settings_store import settings_as_config, settings_from_ingest_payload
+
+    snapped = settings_from_ingest_payload(getattr(job, "payload", None))
+    if snapped is not None:
+        return snapped
+    return settings_as_config(db)
+
+
+def run_ingest(
+    db: Session,
+    job_id: int,
+    *,
+    force_reindex: bool = False,
+    settings: Settings | None = None,
+) -> None:
     job = db.get(Job, job_id)
     if job is None:
         raise RuntimeError(f"job {job_id} not found")
@@ -41,7 +59,7 @@ def run_ingest(db: Session, job_id: int, *, force_reindex: bool = False) -> None
         if not text.strip():
             raise ValueError("Document contains no extractable text")
 
-        settings = get_settings()
+        settings = resolve_ingest_settings(db, job, settings)
         digest = content_hash(text)
         pipe_fp = index_fingerprint(settings)
         prev_hash = doc.content_hash
@@ -79,9 +97,10 @@ def run_ingest(db: Session, job_id: int, *, force_reindex: bool = False) -> None
                 pipe_fp[:12],
             )
 
+        # Status only. content_hash / chunks stay until the swap commits,
+        # so a failed reindex does not publish a half-updated document.
         doc.status = "indexing"
         doc.error_message = None
-        doc.content_hash = digest
         db.commit()
 
         _set_job(db, job, progress=30, step="chunking")
@@ -96,11 +115,6 @@ def run_ingest(db: Session, job_id: int, *, force_reindex: bool = False) -> None
         )
         if not pieces:
             raise ValueError("Chunking produced zero chunks")
-
-        # Replace previous chunks (re-index)
-        for old in list(doc.chunks):
-            db.delete(old)
-        db.flush()
 
         embedder = get_embedder(settings.embedding_model)
         if embedder.dim != settings.embedding_dim:
@@ -118,6 +132,7 @@ def run_ingest(db: Session, job_id: int, *, force_reindex: bool = False) -> None
         for i in range(0, len(texts), batch):
             embeddings.extend(embedder.embed_documents(texts[i : i + batch]))
             pct = 50 + int(30 * min(i + batch, len(texts)) / len(texts))
+            # Progress commits must happen before any chunk delete is pending.
             _set_job(db, job, progress=pct, step="embedding")
 
         meta = dict(doc.meta or {})
@@ -129,6 +144,12 @@ def run_ingest(db: Session, job_id: int, *, force_reindex: bool = False) -> None
         meta["index_pipeline"] = index_pipeline_spec(settings)
 
         _set_job(db, job, progress=85, step="saving")
+
+        # One transaction: drop the previous index and insert the new one.
+        # Do not call _set_job between delete and this commit.
+        for old in list(doc.chunks):
+            db.delete(old)
+        db.flush()
         for i, (piece, vec) in enumerate(zip(pieces, embeddings, strict=True)):
             db.add(
                 Chunk(
@@ -146,11 +167,11 @@ def run_ingest(db: Session, job_id: int, *, force_reindex: bool = False) -> None
             )
 
         doc.num_chunks = len(pieces)
+        doc.content_hash = digest
         doc.status = "indexed"
         doc.error_message = None
         doc.meta = meta
         _set_job(db, job, status="completed", progress=100, step="saving")
-        db.commit()
         try:
             from prism.rag.index.rebuild import rebuild_bm25
 
@@ -164,15 +185,29 @@ def run_ingest(db: Session, job_id: int, *, force_reindex: bool = False) -> None
         db.rollback()
         job = db.get(Job, job_id)
         doc = db.get(Document, job.document_id) if job else None
+        kept = _has_chunks(doc) if doc is not None else False
         if job:
             job.status = "failed"
             job.current_step = "error"
             job.error_message = str(exc)
         if doc:
-            doc.status = "error"
-            doc.error_message = str(exc)
+            if kept:
+                # Previous vectors are still the searchable index.
+                doc.status = "indexed"
+                doc.error_message = f"reindex failed; previous index kept: {exc}"
+            else:
+                doc.status = "error"
+                doc.error_message = str(exc)
         db.commit()
         raise
+
+
+def _has_chunks(doc: Document) -> bool:
+    try:
+        return len(list(doc.chunks or [])) > 0
+    except Exception:
+        logger.exception("could not inspect chunks after failed ingest")
+        return False
 
 
 def _set_job(

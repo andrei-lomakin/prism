@@ -34,3 +34,40 @@ def stored_index_fingerprint(doc_meta: dict[str, Any] | None) -> str | None:
     meta = doc_meta or {}
     fp = meta.get("index_fingerprint")
     return str(fp) if fp else None
+
+
+class IndexFingerprintError(RuntimeError):
+    """Eval corpus is missing or was built with a different index pipeline."""
+
+
+def require_index_fingerprint(documents: list[Any], settings: Settings) -> str:
+    """Stop eval when indexed documents were not built with ``settings``.
+
+    Compares each indexed document's stored fingerprint to the fingerprint of the
+    experiment config. Does not reindex.
+    """
+    expected = index_fingerprint(settings)
+    indexed = [doc for doc in documents if getattr(doc, "status", None) == "indexed"]
+    spec = (
+        f"chunking={settings.chunking_strategy} embedding={settings.embedding_model} "
+        f"fingerprint={expected[:12]}"
+    )
+    if not indexed:
+        raise IndexFingerprintError(
+            "Eval aborted: no indexed documents. Reindex the corpus with this "
+            f"experiment config ({spec})."
+        )
+    bad: list[str] = []
+    for doc in indexed:
+        got = stored_index_fingerprint(getattr(doc, "meta", None))
+        if got != expected:
+            name = getattr(doc, "name", None) or getattr(doc, "id", "?")
+            bad.append(f"{name} fp={(got or 'missing')[:12]}")
+    if bad:
+        preview = "; ".join(bad[:8])
+        extra = f" (+{len(bad) - 8} more)" if len(bad) > 8 else ""
+        raise IndexFingerprintError(
+            "Eval aborted: stored index does not match the experiment config "
+            f"(expected {spec}). Reindex before eval. Mismatched: {preview}{extra}"
+        )
+    return expected

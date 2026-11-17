@@ -94,6 +94,9 @@ class ApprovalStore:
         rec = self._items.get(key)
         return bool(rec and rec.is_live())
 
+    def get(self, approval_id: str) -> ApprovalRecord | None:
+        return self._by_id(approval_id)
+
     def pending(self) -> list[ApprovalRecord]:
         now = time.time()
         out: list[ApprovalRecord] = []

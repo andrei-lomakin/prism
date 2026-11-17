@@ -19,6 +19,7 @@ from prism.api.schemas import (
     UploadResponse,
     UrlIngestRequest,
 )
+from prism.api.settings_store import ingest_settings_payload, settings_as_config
 from prism.config import get_settings
 from prism.db.models import Chunk, Document, Job
 from prism.db.session import get_db
@@ -45,6 +46,18 @@ def _doc_out(d: Document) -> DocumentOut:
         error_message=d.error_message,
         created_at=d.created_at.isoformat() if d.created_at else "",
         updated_at=d.updated_at.isoformat() if d.updated_at else "",
+    )
+
+
+def _queued_job(db: Session, document_id: int) -> Job:
+    """Queue an ingest job pinned to the UI settings at enqueue time."""
+    return Job(
+        document_id=document_id,
+        kind="ingest",
+        status="queued",
+        progress=0,
+        current_step="queued",
+        payload=ingest_settings_payload(settings_as_config(db)),
     )
 
 
@@ -89,7 +102,7 @@ async def upload_document(
     )
     db.add(doc)
     db.flush()
-    job = Job(document_id=doc.id, kind="ingest", status="queued", progress=0, current_step="queued")
+    job = _queued_job(db, doc.id)
     db.add(job)
     db.commit()
     db.refresh(doc)
@@ -119,7 +132,7 @@ async def ingest_url(payload: UrlIngestRequest, db: Session = Depends(get_db)) -
     )
     db.add(doc)
     db.flush()
-    job = Job(document_id=doc.id, kind="ingest", status="queued", progress=0, current_step="queued")
+    job = _queued_job(db, doc.id)
     db.add(job)
     db.commit()
     db.refresh(doc)
@@ -222,13 +235,7 @@ async def reindex_document(
         raise HTTPException(404, "Document not found")
     if doc.status in ("pending", "indexing"):
         raise HTTPException(409, "Indexing already in progress")
-    job = Job(
-        document_id=doc.id,
-        kind="ingest",
-        status="queued",
-        progress=0,
-        current_step="queued",
-    )
+    job = _queued_job(db, doc.id)
     doc.status = "pending"
     db.add(job)
     db.commit()

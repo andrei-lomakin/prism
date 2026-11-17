@@ -7,7 +7,7 @@
       <h1>Очередь одобрений</h1>
       <button type="button" id="btn-refresh" class="btn">Обновить</button>
     </div>
-    <p class="page-intro">Действия агента, требующие валидации пользователем (выход в сеть, песочница, правки памяти и т. п.). Запрос имеет срок действия.</p>
+    <p class="page-intro">Действия агента, требующие валидации (выход в сеть, песочница, правки памяти). Одобрение продолжает тот же запуск с исходными аргументами. Отклонение останавливает его. Запрос имеет срок действия.</p>
   </div>
   <div id="list" class="item-list"></div>
 </section>
@@ -34,7 +34,10 @@
           <button class="btn btn-ghost" data-act="no">Отклонить</button>
         </div>`;
       el.querySelector('[data-act=ok]').onclick = async () => {
-        await fetch('/api/approvals/' + a.id + '/approve', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+        const r = await fetch('/api/approvals/' + a.id + '/approve', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) { alert(data.detail || 'Не удалось одобрить'); return; }
+        if (data.resume_error) alert('Одобрено, но запуск не продолжился: ' + data.resume_error);
         loadApprovals();
       };
       el.querySelector('[data-act=no]').onclick = async () => {

@@ -11,8 +11,10 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from sqlalchemy import select
 
 from prism.config import Settings, get_settings
+from prism.db.models import Document
 from prism.db.session import get_session_factory, init_db
 from prism.eval.aggregate import summarize_metric
 from prism.eval.dataset import load_golden, resolve_data_path
@@ -37,6 +39,7 @@ from prism.eval.relevance import (
 )
 from prism.eval.report import new_run_id, write_report
 from prism.eval.schema import GoldenQuestion
+from prism.ingest.fingerprint import require_index_fingerprint
 from prism.llm.gateway import LLMGateway
 from prism.rag.generate import SYSTEM_PROMPT, build_rag_prompt
 from prism.rag.retrieve import retrieve
@@ -153,6 +156,8 @@ def run_eval(
     n_total = len(questions) or 1
 
     try:
+        docs = list(db.scalars(select(Document)).all())
+        require_index_fingerprint(docs, settings)
         for i, q in enumerate(questions, start=1):
             _progress(
                 {

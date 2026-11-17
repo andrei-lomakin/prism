@@ -66,6 +66,11 @@ class BM25Store:
         self._retriever = bm25s.BM25.load(str(self._index_dir), load_corpus=False)
         return True
 
+    def corpus_size(self) -> int:
+        if self._retriever is None and not self.load():
+            return 0
+        return len(self._ids)
+
     def search(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:
         if self._retriever is None and not self.load():
             return []

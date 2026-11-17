@@ -110,14 +110,22 @@ def _retrieve_inner(
     try:
         if mode == "dense":
             if len(multi_queries) > 1:
-                hits = _multi_dense_rrf(db, multi_queries, candidate_k=candidate_k, settings=cfg)
+                hits = _multi_dense_rrf(
+                    db, multi_queries, candidate_k=candidate_k, settings=cfg, space=space
+                )
                 trace_parts.append("multi_query_rrf")
             else:
-                hits = _dense_search(db, semantic_q, candidate_k=candidate_k, settings=cfg)
+                hits = _dense_search(
+                    db, semantic_q, candidate_k=candidate_k, settings=cfg, space=space
+                )
         elif mode == "lexical":
-            hits = _lexical_search(db, lexical_q, candidate_k=candidate_k, settings=cfg)
+            hits = _lexical_search(
+                db, lexical_q, candidate_k=candidate_k, settings=cfg, space=space
+            )
             if not hits:
-                hits = _dense_search(db, semantic_q, candidate_k=candidate_k, settings=cfg)
+                hits = _dense_search(
+                    db, semantic_q, candidate_k=candidate_k, settings=cfg, space=space
+                )
                 trace_parts.append("lexical->dense_fallback")
         elif mode == "hybrid":
             hits = _hybrid_search(
@@ -126,15 +134,18 @@ def _retrieve_inner(
                 lexical_q=lexical_q,
                 candidate_k=candidate_k,
                 settings=cfg,
+                space=space,
             )
             if not hits:
-                hits = _dense_search(db, semantic_q, candidate_k=candidate_k, settings=cfg)
+                hits = _dense_search(
+                    db, semantic_q, candidate_k=candidate_k, settings=cfg, space=space
+                )
                 trace_parts.append("hybrid->dense_fallback")
         else:
             raise ValueError(f"Unknown retrieval_mode: {mode}")
     except Exception:
         logger.exception("Primary retrieval failed; dense fallback")
-        hits = _dense_search(db, semantic_q, candidate_k=candidate_k, settings=cfg)
+        hits = _dense_search(db, semantic_q, candidate_k=candidate_k, settings=cfg, space=space)
         trace_parts.append("error->dense_fallback")
 
     # Score contract (explicit stages):
@@ -167,6 +178,8 @@ def _retrieve_inner(
     # C7: expand child → parent text for generation context when present
     hits = [_maybe_expand_parent(h) for h in hits]
 
+    # Backstop. Dense/lexical already restrict the candidate pool to ``space``
+    # before LIMIT / rerank, so this must not be the first place the filter runs.
     if space:
         hits = [h for h in hits if (h.space or "personal") == space]
         trace_parts.append(f"space:{space}")
@@ -261,9 +274,14 @@ def _hybrid_search(
     lexical_q: str,
     candidate_k: int,
     settings: Settings,
+    space: str | None = None,
 ) -> list[RetrievedChunk]:
-    dense_hits = _dense_search(db, semantic_q, candidate_k=candidate_k, settings=settings)
-    lex_hits = _lexical_search(db, lexical_q, candidate_k=candidate_k, settings=settings)
+    dense_hits = _dense_search(
+        db, semantic_q, candidate_k=candidate_k, settings=settings, space=space
+    )
+    lex_hits = _lexical_search(
+        db, lexical_q, candidate_k=candidate_k, settings=settings, space=space
+    )
 
     by_id: dict[int, RetrievedChunk] = {h.chunk_id: h for h in dense_hits}
     for h in lex_hits:
@@ -307,11 +325,12 @@ def _multi_dense_rrf(
     *,
     candidate_k: int,
     settings: Settings,
+    space: str | None = None,
 ) -> list[RetrievedChunk]:
     rankings: list[list[str]] = []
     by_id: dict[int, RetrievedChunk] = {}
     for q in queries:
-        hits = _dense_search(db, q, candidate_k=candidate_k, settings=settings)
+        hits = _dense_search(db, q, candidate_k=candidate_k, settings=settings, space=space)
         rankings.append([str(h.chunk_id) for h in hits])
         for h in hits:
             by_id.setdefault(h.chunk_id, h)
@@ -338,20 +357,32 @@ def _multi_dense_rrf(
     return out
 
 
+def _lexical_fetch_k(candidate_k: int, corpus_n: int, space: str | None) -> int:
+    """When a space is selected, rank the whole corpus before keeping ``candidate_k``.
+
+    A global top-k can be entirely other spaces and would drop the real hits.
+    """
+    if space and corpus_n > 0:
+        return corpus_n
+    return candidate_k
+
+
 def _lexical_search(
     db: Session,
     query: str,
     *,
     candidate_k: int,
     settings: Settings,
+    space: str | None = None,
 ) -> list[RetrievedChunk]:
     store = BM25Store(settings.bm25_dir)
-    pairs = store.search(query, top_k=candidate_k)
+    fetch_k = _lexical_fetch_k(candidate_k, store.corpus_size(), space)
+    pairs = store.search(query, top_k=fetch_k)
     if not pairs:
         return []
     ids = [int(cid) for cid, _ in pairs]
     score_map = {int(cid): float(sc) for cid, sc in pairs}
-    rows = db.execute(
+    stmt = (
         select(
             Chunk.id,
             Chunk.document_id,
@@ -365,7 +396,10 @@ def _lexical_search(
         )
         .join(Document, Document.id == Chunk.document_id)
         .where(Chunk.id.in_(ids))
-    ).mappings()
+    )
+    if space:
+        stmt = stmt.where(Chunk.space == space)
+    rows = db.execute(stmt).mappings()
     by_id = {int(r["id"]): r for r in rows}
     out: list[RetrievedChunk] = []
     for cid in ids:
@@ -377,6 +411,9 @@ def _lexical_search(
         doc_key = doc_meta.get("doc_key") or chunk_meta.get("doc_key")
         if isinstance(doc_key, str) and doc_key.startswith("demo_"):
             doc_key = doc_key[len("demo_") :]
+        row_space = r["space"] or "personal"
+        if space and row_space != space:
+            continue
         out.append(
             RetrievedChunk(
                 chunk_id=cid,
@@ -386,12 +423,26 @@ def _lexical_search(
                 score=score_map.get(cid, 0.0),
                 section_path=r["section_path"],
                 page=r["page"],
-                space=r["space"],
+                space=row_space,
                 doc_key=doc_key,
                 meta=dict(chunk_meta) if chunk_meta else None,
             )
         )
+        if len(out) >= candidate_k:
+            break
     return out
+
+
+def dense_search_filters(*, model_name: str, space: str | None) -> list:
+    """Predicates applied before the dense LIMIT."""
+    clauses: list = [
+        Chunk.embedding.is_not(None),
+        Document.status == "indexed",
+        Chunk.embedding_model == model_name,
+    ]
+    if space:
+        clauses.append(Chunk.space == space)
+    return clauses
 
 
 def _dense_search(
@@ -400,6 +451,7 @@ def _dense_search(
     *,
     candidate_k: int,
     settings: Settings,
+    space: str | None = None,
 ) -> list[RetrievedChunk]:
     from prism.rag.index.vector_ann import apply_vector_search_hints
 
@@ -427,11 +479,7 @@ def _dense_search(
             distance.label("distance"),
         )
         .join(Document, Document.id == Chunk.document_id)
-        .where(
-            Chunk.embedding.is_not(None),
-            Document.status == "indexed",
-            Chunk.embedding_model == embedder.model_name,
-        )
+        .where(*dense_search_filters(model_name=embedder.model_name, space=space))
         .order_by(distance)
         .limit(candidate_k)
     )

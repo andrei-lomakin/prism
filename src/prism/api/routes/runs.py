@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -10,12 +11,38 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from prism.agents.policy import get_approval_store
+from prism.agents.policy.approvals import ApprovalRecord
 from prism.api.auth import require_user
+from prism.api.settings_store import settings_as_config
 from prism.db.models import AgentRun, Step
 from prism.db.session import get_db
 from prism.observability import trace_buffer
 
 router = APIRouter(prefix="/api", tags=["runs"], dependencies=[Depends(require_user)])
+logger = logging.getLogger(__name__)
+
+
+def _coerce_run_id(run_id: str | int | None) -> int | None:
+    if isinstance(run_id, int):
+        return run_id
+    if isinstance(run_id, str) and run_id.isdigit():
+        return int(run_id)
+    return None
+
+
+def _resume_approved(db: Session, rec: ApprovalRecord) -> dict[str, Any] | None:
+    """Continue the run that asked for this approval. Same run id, original args."""
+    run_id = _coerce_run_id(rec.run_id)
+    if run_id is None:
+        return None
+    row = db.get(AgentRun, run_id)
+    if row is None or row.state != "awaiting_approval":
+        return None
+    from prism.agents import AgentRuntime
+
+    runtime = AgentRuntime(db, settings=settings_as_config(db), persist=True)
+    answer = runtime.resume(run_id)
+    return {"run_id": answer.run_id, "state": answer.state, "answer": answer.answer}
 
 
 class ApprovalDecision(BaseModel):
@@ -200,19 +227,68 @@ def list_approvals() -> dict[str, Any]:
     }
 
 
+@router.post("/runs/{run_id}/resume")
+def resume_run(run_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Continue a run that is already awaiting_approval (action must be approved)."""
+    row = db.get(AgentRun, run_id)
+    if row is None:
+        raise HTTPException(404, "run not found")
+    if row.state != "awaiting_approval":
+        raise HTTPException(409, f"run state is {row.state}")
+    from prism.agents import AgentRuntime
+
+    runtime = AgentRuntime(db, settings=settings_as_config(db), persist=True)
+    try:
+        answer = runtime.resume(run_id)
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"run_id": answer.run_id, "state": answer.state, "answer": answer.answer}
+
+
 @router.post("/approvals/{approval_id}/approve")
-def approve(approval_id: str, body: ApprovalDecision | None = None) -> dict[str, Any]:
+def approve(
+    approval_id: str,
+    body: ApprovalDecision | None = None,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
     store = get_approval_store()
     rec = store.approve(approval_id, reason=(body.reason if body else None))
     if rec is None:
         raise HTTPException(404, "approval not found")
-    return {"id": rec.id, "status": rec.status}
+    resumed: dict[str, Any] | None = None
+    resume_error: str | None = None
+    try:
+        resumed = _resume_approved(db, rec)
+    except Exception as exc:  # noqa: BLE001 — approval itself already stuck
+        logger.exception("resume after approve failed id=%s", approval_id)
+        resume_error = str(exc)
+    out: dict[str, Any] = {"id": rec.id, "status": rec.status, "run_id": rec.run_id}
+    if resumed is not None:
+        out["run"] = resumed
+    if resume_error:
+        out["resume_error"] = resume_error
+    return out
 
 
 @router.post("/approvals/{approval_id}/deny")
-def deny(approval_id: str, body: ApprovalDecision | None = None) -> dict[str, Any]:
+def deny(
+    approval_id: str,
+    body: ApprovalDecision | None = None,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
     store = get_approval_store()
     rec = store.deny(approval_id, reason=(body.reason if body else None))
     if rec is None:
         raise HTTPException(404, "approval not found")
-    return {"id": rec.id, "status": rec.status}
+    run_id = _coerce_run_id(rec.run_id)
+    if run_id is not None:
+        row = db.get(AgentRun, run_id)
+        if row is not None and row.state == "awaiting_approval":
+            row.state = "cancelled"
+            row.result = {
+                **(row.result or {}),
+                "checkpoint": None,
+                "stopped": rec.reason or "denied",
+            }
+            db.commit()
+    return {"id": rec.id, "status": rec.status, "run_id": rec.run_id}

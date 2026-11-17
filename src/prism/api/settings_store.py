@@ -87,9 +87,41 @@ def settings_as_config(db: Session) -> Settings:
             "hnsw_ef_search": int(out.hnsw_ef_search),
             "rerank_enabled": bool(out.rerank_enabled),
             "rerank_candidates": int(out.rerank_candidates),
+            "rerank_model": out.rerank_model,
             "llm_provider": out.llm_provider,
             "llm_model": out.llm_model,
             "ollama_base_url": out.ollama_base_url,
             "space_default": out.space_default,
         }
     )
+
+
+# Knobs that change chunk identity or which embedder writes Chunk.embedding.
+_INGEST_KEYS = (
+    "embedding_model",
+    "embedding_dim",
+    "chunking_strategy",
+    "chunk_size",
+    "chunk_overlap",
+)
+
+
+def ingest_settings_payload(settings: Settings) -> dict:
+    """JSON stored on Job.payload so the worker indexes with the enqueue-time config."""
+    return {"ingest_settings": {key: getattr(settings, key) for key in _INGEST_KEYS}}
+
+
+def settings_from_ingest_payload(payload: dict | None) -> Settings | None:
+    """Rebuild Settings from a job snapshot. None when the job has no snapshot."""
+    if not isinstance(payload, dict):
+        return None
+    snap = payload.get("ingest_settings")
+    if not isinstance(snap, dict):
+        return None
+    if "embedding_model" not in snap or "chunking_strategy" not in snap:
+        return None
+    update: dict = {}
+    for key in _INGEST_KEYS:
+        if key in snap and snap[key] is not None:
+            update[key] = snap[key]
+    return get_settings().model_copy(update=update)

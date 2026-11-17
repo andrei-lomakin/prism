@@ -43,6 +43,9 @@ def init_db() -> None:
     with engine.begin() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     Base.metadata.create_all(bind=engine)
+    # create_all does not add columns to tables that already exist.
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS payload JSONB"))
     settings = get_settings()
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
     settings.bm25_dir.mkdir(parents=True, exist_ok=True)

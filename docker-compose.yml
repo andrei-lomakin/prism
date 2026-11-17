@@ -6,8 +6,9 @@ services:
       POSTGRES_PASSWORD: prism
       POSTGRES_DB: prism
     ports:
-      # Host 5434 — Windows often already has a native Postgres on 5432
-      - "5434:5432"
+      # Host 5434 — Windows often already has a native Postgres on 5432.
+      # Loopback only: demo credentials are prism/prism.
+      - "127.0.0.1:5434:5432"
     volumes:
       - prism_pg:/var/lib/postgresql/data
     healthcheck:
@@ -36,8 +37,13 @@ services:
       OLLAMA_BASE_URL: http://host.docker.internal:11434
       UPLOAD_DIR: /app/data/uploads
       BM25_DIR: /app/data/bm25
+      # Compose interpolates these from the project .env (not from env_file).
+      # env_file stays .env.example, so a password set only in .env must be listed here.
+      AUTH_USERNAME: ${AUTH_USERNAME:-prism}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:-}
     ports:
-      - "8000:8000"
+      # Bind on the host loopback. uvicorn inside the container still listens on 0.0.0.0.
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./src:/app/src
       - ./data:/app/data
@@ -61,6 +67,8 @@ services:
       OLLAMA_BASE_URL: http://host.docker.internal:11434
       UPLOAD_DIR: /app/data/uploads
       BM25_DIR: /app/data/bm25
+      AUTH_USERNAME: ${AUTH_USERNAME:-prism}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:-}
     volumes:
       - ./src:/app/src
       - ./data:/app/data
@@ -79,7 +87,7 @@ services:
     profiles: ["local-llm"]
     image: ollama/ollama:latest
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     volumes:
       - prism_ollama:/root/.ollama
 
@@ -89,8 +97,8 @@ services:
     profiles: ["obs"]
     image: arizephoenix/phoenix:latest
     ports:
-      - "6006:6006"
-      - "4317:4317"
+      - "127.0.0.1:6006:6006"
+      - "127.0.0.1:4317:4317"
     environment:
       PHOENIX_PORT: "6006"
       PHOENIX_GRPC_PORT: "4317"

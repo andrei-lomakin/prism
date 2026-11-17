@@ -8,10 +8,11 @@ from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from prism.agents.memory import MemoryStore
-from prism.agents.policy import ActionGate, PolicyBundle, load_policy
+from prism.agents.policy import ActionGate, ApprovalStore, PolicyBundle, load_policy
 from prism.agents.policy.audit import AuditLog
 from prism.agents.roles import run_analyst, run_critic, run_retriever, run_web
 from prism.agents.runtime.bus import get_bus
@@ -85,6 +86,7 @@ class AgentRuntime:
         budget: RunBudget | None = None,
         policy: PolicyBundle | None = None,
         approval_fn: Callable[..., bool] | None = None,
+        approvals: ApprovalStore | None = None,
         persist: bool = True,
         on_step: Callable[[dict[str, Any]], None] | None = None,
         on_status: Callable[[str], None] | None = None,
@@ -94,7 +96,9 @@ class AgentRuntime:
         self.budget = budget or RunBudget()
         self.audit = AuditLog()
         self.policy = policy or load_policy()
-        self.gate = ActionGate(self.policy, audit=self.audit, approval_fn=approval_fn)
+        self.gate = ActionGate(
+            self.policy, audit=self.audit, approval_fn=approval_fn, approvals=approvals
+        )
         self.memory = MemoryStore(db)
         self.subagents = SubagentManager()
         self.limits = LimitTracker(self.budget)
@@ -140,6 +144,55 @@ class AgentRuntime:
     def handle(self, objective: str, *, role: str = "orchestrator") -> AgentAnswer:
         run = self._create_run(role=role, objective=objective)
         return self._execute(run, objective, role=role)
+
+    def resume(self, run_id: str | int | None = None) -> AgentAnswer:
+        """Continue the same run after its pending action was approved.
+
+        Executes the checkpoint tool with the original arguments. Does not
+        create a new AgentRun.
+        """
+        run = self._run_for_resume(run_id)
+        if getattr(run, "state", None) != RunState.AWAITING_APPROVAL:
+            raise RuntimeError(
+                f"run {getattr(run, 'id', run_id)} is not awaiting_approval "
+                f"(state={getattr(run, 'state', None)})"
+            )
+        checkpoint = (getattr(run, "result", None) or {}).get("checkpoint") or {}
+        tool_code = str(checkpoint.get("tool") or "")
+        args = dict(checkpoint.get("args") or {})
+        if not tool_code:
+            raise RuntimeError("run has no approval checkpoint")
+        if not self.gate.approvals.is_approved(
+            run_id=getattr(run, "id", None), tool=tool_code, args=args
+        ):
+            raise RuntimeError(
+                f"approval for {tool_code} is not active; approve the original action first"
+            )
+        tool = self.registry.get(tool_code)
+        if tool is None:
+            raise RuntimeError(f"unknown tool {tool_code}")
+
+        t0 = perf_counter()
+        self._active_run = run
+        self._sync_step_counter(run)
+        run.state = RunState.RUNNING
+        self._commit()
+
+        gr = self.gate.execute(run=run, tool=tool, args=args)
+        self._record_step(
+            "tool",
+            {"tool": tool_code, "resumed": True, "args": args},
+            gr.output if gr.executed else {"error": gr.error, "approval_id": gr.approval_id},
+        )
+        if not gr.executed:
+            if gr.error == "approval required" or gr.decision.mode in ("ask", "on_request"):
+                return self._pause_for_approval(run, gr.approval_id, t0)
+            raise RuntimeError(gr.error or "approved action did not execute")
+
+        output = gr.output if isinstance(gr.output, dict) else {"value": gr.output}
+        if output.get("error") == "approval required":
+            return self._pause_for_approval(run, output.get("approval_id"), t0)
+        return self._finish_resumed(run, output, t0)
 
     # --- internals ---
 
@@ -323,24 +376,10 @@ class AgentRuntime:
                             approval_id = out.get("approval_id")
 
             if awaiting:
-                latency = int((perf_counter() - t0) * 1000)
-                msg = "Требуется одобрение действия (ActionGate ask)."
-                if approval_id:
-                    msg += f" approval_id={approval_id}"
-                return AgentAnswer(
-                    run_id=str(run.id),
-                    answer=msg,
-                    model="none",
-                    citations=[],
-                    retrieval_mode=retrieval_mode,
-                    grounding_ok=False,
-                    usage=self.limits.usage.to_dict(),
-                    state=RunState.AWAITING_APPROVAL,
-                    plan=plan,
-                    audit=self._audit_dicts(),
-                    steps=list(self._steps),
-                    latency_ms=latency,
-                )
+                paused = self._pause_for_approval(run, approval_id, t0)
+                paused.retrieval_mode = retrieval_mode
+                paused.plan = plan
+                return paused
 
             if self.limits.would_exceed():
                 self.limits.mark_forced()
@@ -474,6 +513,116 @@ class AgentRuntime:
             run.result = {"error": str(exc)}
             self._commit()
             raise
+
+    def _run_for_resume(self, run_id: str | int | None) -> Any:
+        if self.db is not None and run_id is not None:
+            try:
+                key = int(run_id)
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError(f"run id {run_id} is not a persisted run") from exc
+            row = self.db.get(AgentRun, key)
+            if row is None:
+                raise RuntimeError(f"run {run_id} not found")
+            return row
+        run = self._active_run
+        if run is None:
+            raise RuntimeError("no active run to resume")
+        if run_id is not None and str(run.id) != str(run_id):
+            raise RuntimeError(f"run {run_id} is not the active run {run.id}")
+        return run
+
+    def _sync_step_counter(self, run: Any) -> None:
+        if self.persist and self.db is not None and isinstance(getattr(run, "id", None), int):
+            n = self.db.query(func.max(Step.n)).filter(Step.run_id == run.id).scalar()
+            self._step_n = int(n or 0)
+            return
+        self._step_n = len(self._steps)
+
+    def _pause_for_approval(self, run: Any, approval_id: str | None, t0: float) -> AgentAnswer:
+        rec = self.gate.approvals.get(approval_id) if approval_id else None
+        checkpoint = None
+        if rec is not None:
+            checkpoint = {
+                "approval_id": rec.id,
+                "tool": rec.tool,
+                "args": dict(rec.args),
+                "rule_id": rec.rule_id,
+            }
+        run.state = RunState.AWAITING_APPROVAL
+        run.result = {"checkpoint": checkpoint}
+        run.usage = self.limits.usage.to_dict()
+        self._commit()
+        latency = int((perf_counter() - t0) * 1000)
+        msg = "Требуется одобрение действия (ActionGate ask)."
+        if approval_id:
+            msg += f" approval_id={approval_id}"
+        return AgentAnswer(
+            run_id=str(run.id),
+            answer=msg,
+            model="none",
+            citations=[],
+            retrieval_mode="none",
+            grounding_ok=False,
+            usage=self.limits.usage.to_dict(),
+            state=RunState.AWAITING_APPROVAL,
+            plan=dict(run.plan or {}),
+            audit=self._audit_dicts(),
+            steps=list(self._steps),
+            latency_ms=latency,
+        )
+
+    def _finish_resumed(self, run: Any, output: dict[str, Any], t0: float) -> AgentAnswer:
+        hits = list(output.get("hits") or [])
+        web = list(output.get("results") or [])
+        if not web and output.get("url") and output.get("text"):
+            web = [
+                {
+                    "title": output.get("title") or output.get("url"),
+                    "url": output.get("url"),
+                    "snippet": output.get("text"),
+                }
+            ]
+        objective = str(getattr(run, "objective", "") or "")
+        _, source_texts, citations = self._merge_sources(hits, web or None)
+        self._emit_status("Сборка ответа после одобрения…")
+        answer_text, model, tin, tout, cost, llm_ms = self._synthesize(
+            objective,
+            hits,
+            partial=False,
+            web_snippets=web or None,
+        )
+        self.limits.note_llm(tin + tout, cost)
+        self._record_step(
+            "synthesize", {"resumed": True}, {"model": model, "chars": len(answer_text)}
+        )
+        grounding = check_grounding(answer_text, source_texts)
+        run.state = RunState.COMPLETED
+        run.usage = self.limits.usage.to_dict()
+        run.result = {
+            "answer": answer_text,
+            "resumed": True,
+            "grounding_ok": grounding.ok,
+            "tool_output_keys": sorted(output.keys()),
+        }
+        self._commit()
+        latency = int((perf_counter() - t0) * 1000)
+        return AgentAnswer(
+            run_id=str(run.id),
+            answer=answer_text,
+            model=model,
+            citations=citations,
+            retrieval_mode="resumed",
+            grounding_ok=grounding.ok,
+            usage=self.limits.usage.to_dict(),
+            state=RunState.COMPLETED,
+            plan=dict(run.plan or {}),
+            audit=self._audit_dicts(),
+            steps=list(self._steps),
+            tokens_in=tin,
+            tokens_out=tout,
+            cost_usd=cost,
+            latency_ms=latency or llm_ms,
+        )
 
     def _harvest_batch(
         self, agg: dict[str, Any]
