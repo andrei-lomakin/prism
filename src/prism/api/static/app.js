@@ -770,6 +770,7 @@ const PrismApp = {
     body.chunk_overlap = Number(body.chunk_overlap);
     body.top_k = Number(body.top_k);
     body.rerank_candidates = Number(body.rerank_candidates || 20);
+    body.hnsw_ef_search = Number(body.hnsw_ef_search || 40);
     body.rerank_enabled = !!form.querySelector('#rerank_enabled')?.checked;
     const res = await fetch('/api/settings', {
       method: 'POST',

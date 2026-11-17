@@ -73,6 +73,7 @@ def update_job(job_id: str, **fields: Any) -> dict[str, Any] | None:
 
 def list_jobs(*, limit: int = 20) -> list[dict[str, Any]]:
     ensure_jobs_dir()
+    reap_stale_jobs()
     rows: list[dict[str, Any]] = []
     for path in JOBS_DIR.glob("*.json"):
         try:
@@ -83,52 +84,88 @@ def list_jobs(*, limit: int = 20) -> list[dict[str, Any]]:
     return rows[: max(1, limit)]
 
 
+def reap_stale_jobs(*, queued_max_sec: int = 180, running_max_sec: int = 7200) -> int:
+    """Mark zombie jobs failed (e.g. worker missed function / container FS split)."""
+    ensure_jobs_dir()
+    now = datetime.now(UTC)
+    n = 0
+    for path in JOBS_DIR.glob("*.json"):
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        status = state.get("status")
+        if status not in ("queued", "running"):
+            continue
+        raw = state.get("updated_at") or state.get("created_at") or ""
+        try:
+            ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=UTC)
+        except Exception:
+            continue
+        age = (now - ts).total_seconds()
+        limit = queued_max_sec if status == "queued" else running_max_sec
+        if age < limit:
+            continue
+        state["status"] = "failed"
+        state["step"] = "stale"
+        state["error"] = (
+            "Прогон завис: worker не подхватил задачу (перезапустите worker, "
+            "убедитесь что смонтирован ./reports). Можно запустить снова."
+        )
+        state["detail"] = state["error"]
+        save_job(state)
+        n += 1
+    return n
+
+
 # Human labels for diploma UI (stem → title / group / hint).
 _EVAL_CONFIG_META: dict[str, dict[str, str]] = {
     "ablate_dense": {
         "title": "Векторный поиск (dense) · dev",
         "group": "Сравнение поиска (dev)",
-        "hint": "Только эмбеддинги, без BM25. База для сравнения с hybrid.",
+        "hint": "Только dense-retrieval по эмбеддингам, без BM25. Контроль для сравнения с hybrid.",
     },
     "ablate_hybrid": {
         "title": "Гибрид dense+BM25 (RRF) · dev",
         "group": "Сравнение поиска (dev)",
-        "hint": "Смешанный поиск — обычно лучший Recall@5 на защите.",
+        "hint": "Dense + BM25, слияние через RRF. Обычно выше Recall@5, чем у чистого dense.",
     },
     "ablate_lexical": {
         "title": "Только слова (BM25) · dev",
         "group": "Сравнение поиска (dev)",
-        "hint": "Классический лексический поиск без векторов.",
+        "hint": "Только лексический BM25, без векторного поиска.",
     },
     "ablate_minilm_l6": {
         "title": "Dense на MiniLM-L6 · dev",
         "group": "Сравнение поиска (dev)",
-        "hint": "Другая модель эмбеддингов (английский уклон).",
+        "hint": "Dense с другой моделью эмбеддингов (all-MiniLM-L6-v2).",
     },
     "ablate_hybrid_test": {
         "title": "Гибрид · test (held-out)",
         "group": "Контрольный test",
-        "hint": "Тот же hybrid на test.jsonl — не тюнить по этим цифрам.",
+        "hint": "Hybrid на test.jsonl. Held-out: не подбирать гиперпараметры по этим цифрам.",
     },
     "baseline_test": {
         "title": "Baseline + ответы · test",
         "group": "Контрольный test",
-        "hint": "Полный прогон на held-out; долго, если включена генерация.",
+        "hint": "Полный пайплайн на held-out test; с генерацией занимает заметно больше времени.",
     },
     "baseline": {
         "title": "Baseline + ответы · dev",
         "group": "Полный прогон",
-        "hint": "Поиск и генерация с LLM-judge на всём dev.",
+        "hint": "Retrieval + генерация ответов и LLM-judge на dev-сплите.",
     },
     "smoke": {
         "title": "Быстрая проверка (30 вопросов)",
         "group": "Диагностика",
-        "hint": "Короткий retrieval-only прогон, чтобы убедиться что стек жив.",
+        "hint": "Короткий retrieval-only прогон для проверки, что индекс и retrieve живы.",
     },
     "ci_smoke": {
         "title": "CI-мини (10 вопросов)",
         "group": "Диагностика",
-        "hint": "Самый короткий срез для пайплайна CI.",
+        "hint": "Минимальный срез для CI / smoke в пайплайне.",
     },
 }
 

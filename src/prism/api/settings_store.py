@@ -17,6 +17,8 @@ def _base_out(s: Settings) -> SettingsOut:
         chunk_overlap=s.chunk_overlap,
         top_k=s.top_k,
         retrieval_mode=s.retrieval_mode,
+        vector_search=s.vector_search,  # type: ignore[arg-type]
+        hnsw_ef_search=int(s.hnsw_ef_search),
         rerank_enabled=bool(s.rerank_enabled),
         rerank_candidates=int(s.rerank_candidates),
         llm_provider=s.llm_provider,
@@ -52,6 +54,14 @@ def save_settings(db: Session, update: SettingsUpdate) -> SettingsOut:
         from prism.rag.embeddings.base import clear_embedder_cache
 
         clear_embedder_cache()
+    if "vector_search" in patch:
+        from prism.db.session import get_engine
+        from prism.rag.index.vector_ann import ensure_vector_index
+
+        mode = str(current.get("vector_search") or "exact")
+        if mode not in ("exact", "hnsw"):
+            mode = "exact"
+        ensure_vector_index(get_engine(), mode)  # type: ignore[arg-type]
     return get_effective_settings(db)
 
 
@@ -67,6 +77,8 @@ def settings_as_config(db: Session) -> Settings:
             "chunk_overlap": out.chunk_overlap,
             "top_k": out.top_k,
             "retrieval_mode": out.retrieval_mode,
+            "vector_search": out.vector_search,
+            "hnsw_ef_search": int(out.hnsw_ef_search),
             "rerank_enabled": bool(out.rerank_enabled),
             "rerank_candidates": int(out.rerank_candidates),
             "llm_provider": out.llm_provider,

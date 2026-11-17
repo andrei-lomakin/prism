@@ -96,6 +96,30 @@
 
     <div class="field">
       <div class="field-head">
+        <span class="field-title">Поиск по векторам (pgvector)</span>
+        <button type="button" class="tip" aria-label="Подсказка: ANN" data-tip>
+          ?
+          <span class="tip-pop" role="tooltip">
+            <b>Точный</b> — полный перебор (seq scan), эталон для метрик.<br/>
+            <b>HNSW</b> — приближённый индекс pgvector, быстрее на большой базе.
+            При первом включении индекс строится (может занять время).
+          </span>
+        </button>
+      </div>
+      <select name="vector_search" id="vector_search">
+        <option value="exact" {% if settings.vector_search == 'exact' %}selected{% endif %}>Точный (без ANN)</option>
+        <option value="hnsw" {% if settings.vector_search == 'hnsw' %}selected{% endif %}>HNSW (приближённый)</option>
+      </select>
+      <label class="settings-candidates" style="margin-top:.55rem;max-width:12rem">
+        HNSW ef_search
+        <input type="number" name="hnsw_ef_search" id="hnsw_ef_search"
+          value="{{ settings.hnsw_ef_search }}" min="10" max="400"
+          {% if settings.vector_search != 'hnsw' %}disabled{% endif %} />
+      </label>
+    </div>
+
+    <div class="field">
+      <div class="field-head">
         <span class="field-title">Реранжирование</span>
         <button type="button" class="tip" aria-label="Подсказка: реранк" data-tip>
           ?
@@ -220,6 +244,14 @@
     rerankLabel.textContent = on ? 'вкл' : 'выкл';
     rerankCand.disabled = !on;
   }
+
+  const vectorSearch = document.getElementById('vector_search');
+  const hnswEf = document.getElementById('hnsw_ef_search');
+  function refreshVector() {
+    hnswEf.disabled = vectorSearch.value !== 'hnsw';
+  }
+  vectorSearch.addEventListener('change', refreshVector);
+  refreshVector();
 
   embSelect.addEventListener('change', refreshEmbWarn);
   rerankCb.addEventListener('change', refreshRerank);

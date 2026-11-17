@@ -46,3 +46,10 @@ def init_db() -> None:
     settings = get_settings()
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
     settings.bm25_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        from prism.rag.index.vector_ann import ensure_vector_index
+
+        ensure_vector_index(engine, settings.vector_search)
+    except Exception:
+        # Index build can fail on empty/odd DBs — search still works via seq scan.
+        pass

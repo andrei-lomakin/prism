@@ -401,9 +401,17 @@ def _dense_search(
     candidate_k: int,
     settings: Settings,
 ) -> list[RetrievedChunk]:
+    from prism.rag.index.vector_ann import apply_vector_search_hints
+
     embedder = get_embedder(settings.embedding_model)
     qvec = embedder.embed_query(query)
     distance = Chunk.embedding.cosine_distance(qvec)
+    mode = getattr(settings, "vector_search", "exact") or "exact"
+    apply_vector_search_hints(
+        db,
+        mode if mode in ("exact", "hnsw") else "exact",
+        ef_search=int(getattr(settings, "hnsw_ef_search", 40) or 40),
+    )
 
     stmt = (
         select(

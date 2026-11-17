@@ -179,6 +179,9 @@ async def start_eval_job(body: StartEvalRequest) -> dict[str, Any]:
     if not full.is_file():
         raise HTTPException(404, f"config not found: {cfg_path}")
 
+    from prism.eval.jobs import reap_stale_jobs, update_job
+
+    reap_stale_jobs(queued_max_sec=90)
     active = [
         j
         for j in list_jobs(limit=50)
@@ -201,8 +204,6 @@ async def start_eval_job(body: StartEvalRequest) -> dict[str, Any]:
             bool(body.skip_generation),
         )
     except Exception as exc:
-        from prism.eval.jobs import update_job
-
         update_job(state["id"], status="failed", error=str(exc), step="enqueue_failed")
         raise HTTPException(503, f"Не удалось поставить в очередь (worker/redis?): {exc}") from exc
     finally:
