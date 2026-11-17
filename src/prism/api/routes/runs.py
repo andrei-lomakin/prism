@@ -37,9 +37,7 @@ def list_runs(
         .limit(page_size)
         .all()
     )
-    step_counts = dict(
-        db.query(Step.run_id, func.count(Step.id)).group_by(Step.run_id).all()
-    )
+    step_counts = dict(db.query(Step.run_id, func.count(Step.id)).group_by(Step.run_id).all())
     items = []
     for row in rows:
         n_steps = int(step_counts.get(row.id) or 0)
@@ -75,14 +73,9 @@ def list_pipeline_logs(
     """Unified journal: persisted agent runs + recent in-memory RAG traces."""
     run_total = int(db.query(func.count(AgentRun.id)).scalar() or 0)
     run_rows = (
-        db.query(AgentRun)
-        .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
-        .limit(500)
-        .all()
+        db.query(AgentRun).order_by(AgentRun.created_at.desc(), AgentRun.id.desc()).limit(500).all()
     )
-    step_counts = dict(
-        db.query(Step.run_id, func.count(Step.id)).group_by(Step.run_id).all()
-    )
+    step_counts = dict(db.query(Step.run_id, func.count(Step.id)).group_by(Step.run_id).all())
     items: list[dict[str, Any]] = []
     run_ids = set()
     for row in run_rows:

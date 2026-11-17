@@ -8,6 +8,7 @@
 | 20261117T110158Z_ablate_dens | scientific | dense | C2 | 60 | 0.590 | 0.355 | 0.407 | 0.667 | — | — | 118.7 | 0.0000 | 29bd526c2332 |
 | 20261117T110614Z_ablate_hybr | scientific | hybrid | C2 | 66 | 0.868 | 0.669 | 0.722 | 0.947 | — | — | 431.1 | 0.0000 | 29bd526c2332 |
 | 20261117T110652Z_baseline_te | scientific | dense | C2 | 66 | 0.412 | 0.344 | 0.403 | 0.421 | — | — | 414.4 | 0.0000 | 29bd526c2332 |
+| 20261117T125111Z_ablate_hybr | scientific | hybrid | C2 | 60 | 0.808 | 0.695 | 0.695 | 0.949 | — | — | 111.6 | 0.0000 | — |
 
 ## Best vs baseline (paired bootstrap on recall@5)
 

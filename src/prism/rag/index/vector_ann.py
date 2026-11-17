@@ -15,7 +15,9 @@ VectorSearchMode = Literal["exact", "hnsw"]
 HNSW_INDEX = "chunks_embedding_hnsw_cosine_idx"
 
 
-def ensure_vector_index(engine: Engine, mode: VectorSearchMode, *, ef_construction: int = 64) -> str:
+def ensure_vector_index(
+    engine: Engine, mode: VectorSearchMode, *, ef_construction: int = 64
+) -> str:
     """Create or drop HNSW index on chunks.embedding to match the chosen mode."""
     with engine.begin() as conn:
         exists = conn.execute(

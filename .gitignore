@@ -47,3 +47,6 @@ reports/*/
 
 # uv / locks local
 .python-version
+
+# Offline pip wheels (Docker DNS workaround)
+.wheels/

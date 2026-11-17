@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from arq import create_pool
 from arq.connections import RedisSettings
@@ -61,7 +64,9 @@ def _resolve_run_dir(run_id: str) -> Path:
     if direct.is_dir() and (direct / "metrics.json").is_file():
         return direct
     matches = sorted(
-        p for p in REPORTS.iterdir() if p.is_dir() and run_id in p.name and (p / "metrics.json").is_file()
+        p
+        for p in REPORTS.iterdir()
+        if p.is_dir() and run_id in p.name and (p / "metrics.json").is_file()
     )
     if not matches:
         raise HTTPException(404, "report not found")
@@ -132,9 +137,10 @@ def _worst_from_path(path: Path, n: int) -> list[dict[str, Any]]:
     return [r for _, r in scored[: max(1, n)]]
 
 
-def _ensure_pdf(folder: Path, data: dict[str, Any]) -> Path | None:
+def _ensure_pdf(folder: Path, data: dict[str, Any], *, force: bool = True) -> Path | None:
+    """Build (or rebuild) report.pdf from metrics + per_question."""
     pdf = folder / "report.pdf"
-    if pdf.is_file():
+    if pdf.is_file() and not force:
         return pdf
     per_q: list[dict[str, Any]] = []
     pq = folder / "per_question.jsonl"
@@ -148,7 +154,8 @@ def _ensure_pdf(folder: Path, data: dict[str, Any]) -> Path | None:
 
         return write_pdf_report(folder, data, per_q)
     except Exception:
-        return None
+        logger.exception("PDF build failed for %s", folder.name)
+        return pdf if pdf.is_file() else None
 
 
 @router.get("/configs")
@@ -182,11 +189,7 @@ async def start_eval_job(body: StartEvalRequest) -> dict[str, Any]:
     from prism.eval.jobs import reap_stale_jobs, update_job
 
     reap_stale_jobs(queued_max_sec=90)
-    active = [
-        j
-        for j in list_jobs(limit=50)
-        if j.get("status") in ("queued", "running")
-    ]
+    active = [j for j in list_jobs(limit=50) if j.get("status") in ("queued", "running")]
     if active:
         raise HTTPException(
             409,
@@ -225,7 +228,9 @@ def list_eval_runs(
     page = min(page, pages)
     start = (page - 1) * page_size
     page_items = items[start : start + page_size]
-    scientific = [it for it in items if it["role"] == "scientific" and it.get("recall@5") is not None]
+    scientific = [
+        it for it in items if it["role"] == "scientific" and it.get("recall@5") is not None
+    ]
     pool = scientific or [it for it in items if it.get("recall@5") is not None]
     best = max(pool, key=lambda x: float(x["recall@5"]), default=None) if pool else None
     return {
@@ -249,7 +254,8 @@ def download_eval_pdf(run_id: str) -> FileResponse:
     if pdf is None or not pdf.is_file():
         raise HTTPException(
             503,
-            "PDF недоступен (нужен fpdf2 и TTF с кириллицей, напр. Segoe UI / DejaVu)",
+            "PDF недоступен: установите fpdf2 в окружении API и проверьте "
+            "src/prism/eval/fonts/PrismSans.ttf (кириллица).",
         )
     return FileResponse(
         path=pdf,
