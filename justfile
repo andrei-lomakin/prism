@@ -77,11 +77,17 @@ golden target="240":
 eval-smoke:
     {{ python }} -m prism.cli eval run --config configs/eval/smoke.yaml --skip-generation
 
+eval-dense:
+    {{ python }} -m prism.cli eval run --config configs/eval/ablate_dense.yaml --skip-generation
+
 eval-hybrid:
     {{ python }} -m prism.cli eval run --config configs/eval/ablate_hybrid.yaml --skip-generation
 
+eval-pair: eval-dense eval-hybrid
+    {{ python }} -m prism.cli eval compare --baseline-config configs/eval/ablate_dense.yaml
+
 eval-compare:
-    {{ python }} -m prism.cli eval compare
+    {{ python }} -m prism.cli eval compare --baseline-config configs/eval/ablate_dense.yaml
 
 eval-kappa a="data/golden/annotator_a.example.jsonl" b="data/golden/annotator_b.example.jsonl":
     {{ python }} -m prism.cli eval kappa --a {{ a }} --b {{ b }}

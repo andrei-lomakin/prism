@@ -113,10 +113,15 @@ def context_recall_at_k(
 
 
 def section_soft_match(gold_section: str | None, section_path: str | None) -> bool:
+    """Soft section check after doc_key already matched.
+
+    Missing ``section_path`` on the chunk (e.g. C2 has no headings) degrades to
+    doc-level match — cannot refute what the indexer did not store.
+    """
     if not gold_section:
         return True
     if not section_path:
-        return False
+        return True
     g = gold_section.lower().strip()
     p = section_path.lower().strip()
     return g == p or g in p or p in g

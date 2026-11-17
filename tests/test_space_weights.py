@@ -44,4 +44,3 @@ def test_space_weight_still_can_override_close_rerank_scores():
     )
     # 0.80*1.0=0.80 > 0.85*0.72=0.612
     assert out[0].chunk_id == 1
-

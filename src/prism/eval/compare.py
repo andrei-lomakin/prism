@@ -190,9 +190,7 @@ def select_baseline(
 
     for needle in needles:
         matches = [
-            r
-            for r in scientific
-            if needle.lower() in _norm_path(r.get("eval_config")).lower()
+            r for r in scientific if needle.lower() in _norm_path(r.get("eval_config")).lower()
         ]
         if matches:
             matches.sort(

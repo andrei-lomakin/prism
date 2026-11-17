@@ -39,6 +39,7 @@ from prism.eval.schema import GoldenQuestion
 from prism.llm.gateway import LLMGateway
 from prism.rag.generate import SYSTEM_PROMPT, build_rag_prompt
 from prism.rag.retrieve import retrieve
+from prism.rag.retrieve.packer import pack_context
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -217,11 +218,14 @@ def run_eval(
         summary["generation"] = {
             "faithfulness": summarize_metric(faith),
             "answer_relevance": summarize_metric(arel),
-            "citation_accuracy": summarize_metric(cite_acc),
-            "correctness": summarize_metric(correct) if correct else None,
+            # Structural [n] check — not semantic citation accuracy.
+            "citation_structural_ok": summarize_metric(cite_acc),
+            "correctness_lexical": summarize_metric(correct) if correct else None,
             "refusal_accuracy": summarize_metric(refuse) if refuse else None,
             "judge_note": (
                 "LLM-as-judge via Ollama when available; heuristic fallback on failure. "
+                "citation_structural_ok = valid [n] targets (not semantic accuracy). "
+                "correctness_lexical = token-F1 vs gold (not semantic correctness). "
                 "Cohen's κ vs human labels: pending (see data/golden/ANNOTATION.md). "
                 "Use `prism eval kappa --a ... --b ...` when dual annotations exist."
             ),
@@ -242,13 +246,22 @@ def _eval_one(
     use_llm_judge: bool,
 ) -> dict[str, Any]:
     t0 = time.perf_counter()
-    hits, mode = retrieve(db, q.question, top_k=eval_top_k, settings=settings)
+    # Score@k on raw ranked hits — packer must not shrink Recall@10.
+    ranked_hits, mode = retrieve(db, q.question, top_k=eval_top_k, settings=settings, pack=False)
     retrieve_ms = (time.perf_counter() - t0) * 1000
 
     relevant = gold_doc_keys(q)
-    ranked = retrieved_doc_keys(hits)
+    ranked = retrieved_doc_keys(ranked_hits)
     gold_units = gold_evidence_units(q)
-    ctx_units = retrieved_context_units(hits)
+    # Context_* = what generation would see after pack (section-aware).
+    packed_hits = pack_context(
+        ranked_hits,
+        max_chunks=settings.pack_max_chunks,
+        max_tokens=settings.pack_max_tokens,
+        max_per_doc=settings.pack_max_per_doc,
+        min_score=settings.pack_min_score,
+    )
+    ctx_units = retrieved_context_units(packed_hits)
     ctx_labels = chunk_relevance_labels(gold_units, ctx_units)
 
     row: dict[str, Any] = {
@@ -260,6 +273,8 @@ def _eval_one(
         "retrieve_ms": round(retrieve_ms, 2),
         "relevant_docs": sorted(relevant),
         "retrieved_docs": ranked,
+        "n_ranked": len(ranked_hits),
+        "n_packed": len(packed_hits),
         "recall@1": recall_at_k(relevant, ranked, 1) if relevant else None,
         "recall@3": recall_at_k(relevant, ranked, 3) if relevant else None,
         "recall@5": recall_at_k(relevant, ranked, 5) if relevant else None,
@@ -282,7 +297,7 @@ def _eval_one(
             "score": h.score,
             "section_path": h.section_path,
         }
-        for h in hits[: settings.top_k]
+        for h in packed_hits[: settings.top_k]
     ]
     prompt = build_rag_prompt(q.question, contexts)
     gateway = LLMGateway(settings)

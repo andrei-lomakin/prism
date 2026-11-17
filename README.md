@@ -99,16 +99,18 @@ Deep dive (Russian, gitignored in some clones): `docs/architecture.md`.
 
 ---
 
-## Eval snapshot (dev, hybrid RRF)
+## Eval snapshot (dev, same 39 answerable Qs)
 
-| Metric | mean |
-|---|---:|
-| Recall@5 | 0.934 |
-| MRR@10 | 0.754 |
-| nDCG@10 | 0.817 |
-| Hit@5 | 1.000 |
+| | Dense | Hybrid RRF |
+|---|---:|---:|
+| Recall@5 | 0.590 | **0.808** |
+| MRR@10 | 0.355 | **0.695** |
+| nDCG@10 | 0.407 | **0.695** |
+| Hit@5 | 0.667 | **0.949** |
 
-Default chat model: `qwen3:4b` (Ollama). Embedder: `paraphrase-multilingual-MiniLM-L12-v2`. Postgres host port **5434**.
+Paired Δ Recall@5 = +0.218 (95% CI 0.115–0.321, P(Δ>0)=1.0). Details: [`docs/FINAL_RESULTS.md`](docs/FINAL_RESULTS.md).
+
+Default chat model: `qwen2.5:1.5b` (Ollama; light default for weak GPUs — swap via Settings / `LLM_MODEL`). Embedder: `paraphrase-multilingual-MiniLM-L12-v2`. Postgres host port **5434**.
 
 ---
 
@@ -139,7 +141,7 @@ npx --yes @marp-team/marp-cli docs/slides.md -o docs/slides.pdf
 | Demo corpus (`data/demo/corpus/`) | Original MIT educational notes for this diploma |
 | `sentence-transformers` / MiniLM | Apache-2.0 (Hugging Face model cards) |
 | `bm25s`, FastAPI, SQLAlchemy, pgvector | respective OSS licenses |
-| Ollama models (e.g. qwen3) | follow model card terms |
+| Ollama models (e.g. qwen2.5) | follow model card terms |
 
 No scraped copyrighted books/articles in the committed corpus.
 

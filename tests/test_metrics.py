@@ -34,11 +34,7 @@ def test_ndcg_idcg_uses_missing_gold():
     # Old bug: ideal = sort([1,0,0]) → nDCG=1.0. Correct ideal = [1,1,1].
     got = ndcg_at_k(relevant, retrieved, 3)
     dcg_fact = 1.0  # only pos1 relevant: (2^1-1)/log2(2)
-    dcg_ideal = (
-        1.0 / math.log2(2)
-        + 1.0 / math.log2(3)
-        + 1.0 / math.log2(4)
-    )
+    dcg_ideal = 1.0 / math.log2(2) + 1.0 / math.log2(3) + 1.0 / math.log2(4)
     assert abs(got - dcg_fact / dcg_ideal) < 1e-9
     assert got < 1.0
 
@@ -56,7 +52,7 @@ def test_context_precision_not_precision_at_k():
 
 
 def test_context_recall_section_aware():
-    from prism.eval.metrics import context_recall_at_k
+    from prism.eval.metrics import context_recall_at_k, section_soft_match
 
     gold = [("doc1", "Intro"), ("doc2", None)]
     # Wrong section on doc1 — unit not covered; doc2 covered by any section
@@ -65,3 +61,5 @@ def test_context_recall_section_aware():
     # Soft substring match
     hits2 = [("doc1", "Chapter / Intro / more"), ("doc2", "x")]
     assert context_recall_at_k(gold, hits2, 2) == 1.0
+    # C2 chunks often lack section_path → degrade to doc match
+    assert section_soft_match("Intro", None) is True

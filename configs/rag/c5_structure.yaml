@@ -15,7 +15,7 @@ rewrite:
   strategy: R0
 generation:
   provider: ollama
-  model: qwen3:4b
+  model: qwen2.5:1.5b
 packer:
   max_chunks: 8
   max_tokens: 2048

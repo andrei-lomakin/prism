@@ -31,8 +31,14 @@ def retrieve(
     settings: Settings | None = None,
     history: list[dict] | None = None,
     space: str | None = None,
+    pack: bool = True,
 ) -> tuple[list[RetrievedChunk], str]:
-    """Return packed chunks and retrieval_mode string (includes fallbacks).
+    """Return chunks and retrieval_mode string (includes fallbacks).
+
+    ``pack=True`` (default, chat/agent): apply ``pack_context`` then truncate to ``top_k``.
+    ``pack=False`` (eval Score@k): return the **raw ranked** list truncated to ``top_k``
+    — no ``max_per_doc`` / token-budget packing. Use this for Recall/MRR/nDCG so metrics
+    measure retrieval, not the generation packer.
 
     ``space``: if personal/project/shared — hard-filter hits to that space.
     ``None`` / ``all`` / empty — search all spaces (weights still apply).
@@ -47,7 +53,13 @@ def retrieve(
 
     with span(
         "rag.retrieve",
-        attributes={"mode": mode, "top_k": k, "rewrite": cfg.rewrite_strategy, "space": space_f},
+        attributes={
+            "mode": mode,
+            "top_k": k,
+            "rewrite": cfg.rewrite_strategy,
+            "space": space_f,
+            "pack": pack,
+        },
     ):
         return _retrieve_inner(
             db,
@@ -57,6 +69,7 @@ def retrieve(
             history=history,
             trace_parts=trace_parts,
             space=space_f,
+            pack=pack,
         )
 
 
@@ -69,6 +82,7 @@ def _retrieve_inner(
     history: list[dict] | None,
     trace_parts: list[str],
     space: str | None = None,
+    pack: bool = True,
 ) -> tuple[list[RetrievedChunk], str]:
     cfg = settings
     k = top_k
@@ -156,6 +170,11 @@ def _retrieve_inner(
     if space:
         hits = [h for h in hits if (h.space or "personal") == space]
         trace_parts.append(f"space:{space}")
+
+    ranked = hits[:k]
+    if not pack:
+        trace_parts.append("nopack")
+        return ranked, "+".join(trace_parts)
 
     # CE logits can be negative — do not apply retrieval-oriented min_score after rerank.
     pack_floor = float("-inf") if did_rerank else cfg.pack_min_score

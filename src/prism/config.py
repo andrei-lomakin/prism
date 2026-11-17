@@ -36,7 +36,7 @@ class Settings(BaseSettings):
 
     llm_provider: Literal["ollama", "openai_compatible"] = "ollama"
     ollama_base_url: str = "http://localhost:11434"
-    llm_model: str = "qwen3:4b"
+    llm_model: str = "qwen2.5:1.5b"
     openai_api_base: str | None = None
     openai_api_key: str | None = None
     openai_model: str | None = None

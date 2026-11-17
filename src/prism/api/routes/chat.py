@@ -175,7 +175,11 @@ def api_chat(payload: ChatRequest, db: Session = Depends(get_db)) -> ChatRespons
 
 @router.post("/chat/stream")
 def api_chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> StreamingResponse:
-    """SSE stream: plan/steps/token chunks/final. Agent emits step events; RAG chunks answer."""
+    """SSE *event* stream: plan/steps/chunk/final — not live LLM token streaming.
+
+    The model call is non-streaming; the finished answer is sliced into ``chunk``
+    events for UI progress. Agent mode also emits intermediate step events.
+    """
     cfg = settings_as_config(db)
     tid = trace_buffer.start_trace()
 
@@ -259,20 +263,20 @@ def api_chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> Stre
                 text = answer.answer or ""
                 chunk_size = 48
                 for i in range(0, len(text), chunk_size):
-                    yield _sse("token", {"text": text[i : i + chunk_size]})
-                yield _sse(
-                    "final",
-                    {
-                        "answer": answer.answer,
-                        "model": answer.model,
-                        "citations": answer.citations,
-                        "retrieval_mode": answer.retrieval_mode,
-                        "grounding_ok": answer.grounding_ok,
-                        "trace_id": str(answer.run_id),
-                        "state": answer.state,
-                        "usage": answer.usage,
-                    },
-                )
+                    yield _sse("chunk", {"text": text[i : i + chunk_size]})
+                    yield _sse(
+                        "final",
+                        {
+                            "answer": answer.answer,
+                            "model": answer.model,
+                            "citations": answer.citations,
+                            "retrieval_mode": answer.retrieval_mode,
+                            "grounding_ok": answer.grounding_ok,
+                            "trace_id": str(answer.run_id),
+                            "state": answer.state,
+                            "usage": answer.usage,
+                        },
+                    )
             else:
                 yield _sse("status", {"text": "Ищем релевантные фрагменты в базе…"})
                 hits, mode = retrieve(
@@ -301,7 +305,7 @@ def api_chat_stream(payload: ChatRequest, db: Session = Depends(get_db)) -> Stre
                 result = gateway.chat(user_message=user_prompt, system_prompt=SYSTEM_PROMPT)
                 text = result.text or ""
                 for i in range(0, len(text), 48):
-                    yield _sse("token", {"text": text[i : i + 48]})
+                    yield _sse("chunk", {"text": text[i : i + 48]})
                 grounding = check_grounding(result.text, [h.text for h in hits])
                 yield _sse(
                     "final",

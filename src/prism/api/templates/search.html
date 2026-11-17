@@ -107,9 +107,9 @@
           <button type="button" class="tip" aria-label="Подсказка: поток" data-tip>
             ?
             <span class="tip-pop tip-pop-end" role="tooltip">
-              Показывать ход работы по мере готовности:
+              Поток <b>событий</b> (SSE), не live-токены LLM:
               <ul>
-                <li><b>Вкл</b> — шаги и текст появляются постепенно</li>
+                <li><b>Вкл</b> — шаги агента + нарезка готового ответа</li>
                 <li><b>Выкл</b> — один ответ в конце</li>
               </ul>
               На качество ответа не влияет.
@@ -170,7 +170,7 @@
     const streamLabel = document.querySelector('.switch-text');
     if (streamLabel) streamLabel.textContent = streamOn ? 'вкл' : 'выкл';
     document.getElementById('flow-hint').textContent =
-      `маршрут: ${SPACE_RU[space] || space} · ${mode === 'agent' ? 'агент' : 'RAG'} · ${streamOn ? 'поток' : 'одним ответом'} · фрагментов ${k}`;
+      `маршрут: ${SPACE_RU[space] || space} · ${mode === 'agent' ? 'агент' : 'RAG'} · ${streamOn ? 'SSE-события' : 'одним ответом'} · фрагментов ${k}`;
   }
   document.querySelectorAll('input[name="mode"], input[name="space"]').forEach((el) => {
     el.addEventListener('change', refreshHint);

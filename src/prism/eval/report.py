@@ -75,8 +75,14 @@ def _markdown(summary: dict) -> str:
             "| metric | mean | 95% CI |",
             "|---|---:|---:|",
         ]
-        for key in ("faithfulness", "answer_relevance", "citation_accuracy", "refusal_accuracy"):
-            if key not in gen:
+        for key in (
+            "faithfulness",
+            "answer_relevance",
+            "citation_structural_ok",
+            "correctness_lexical",
+            "refusal_accuracy",
+        ):
+            if key not in gen or gen[key] is None:
                 continue
             m = gen[key]
             lines.append(f"| {key} | {m['mean']:.4f} | [{m['ci95_lo']:.4f}, {m['ci95_hi']:.4f}] |")

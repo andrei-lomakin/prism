@@ -86,7 +86,12 @@ const PrismApp = {
         return n != null ? `найдено фрагментов: ${n}` : 'поиск по базе';
       }
       if (tool === 'verify_citations') return 'проверка цитат и опоры на контекст';
-      if (tool === 'web_search') return 'поиск в сети (или mock)';
+      if (tool === 'web_search') {
+        const prov = out && typeof out === 'object' ? out.provider : null;
+        return prov && String(prov).startsWith('mock')
+          ? `веб-поиск · mock (${prov})`
+          : 'веб-поиск';
+      }
       if (tool === 'build_comparison_table') return 'сводная таблица';
       if (tool === 'distill_run') return 'запись выводов в память';
       return tool || 'вызов инструмента';
@@ -195,7 +200,8 @@ const PrismApp = {
     const { answer } = this._els();
     if (!answer) return;
     answer.classList.remove('hidden');
-    // During token stream keep plain text; final event re-renders with links.
+    // During SSE chunk stream keep plain text; final event re-renders with links.
+    // (Not live LLM tokens — finished answer sliced for UI.)
     answer.textContent += text || '';
   },
 
@@ -380,7 +386,7 @@ const PrismApp = {
             this._setStatus('Контекст собран, генерируем ответ…');
             this._addStep('Поиск по базе', detail, { active: true });
           }
-          if (event === 'token') {
+          if (event === 'chunk' || event === 'token') {
             if (!answerStarted) {
               answerStarted = true;
               this._setStatus('Печатаем ответ…');
